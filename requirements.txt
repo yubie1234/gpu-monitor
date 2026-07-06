@@ -1,0 +1,5 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.5
+pydantic-settings>=2.1
+# PyYAML 은 선택 — 설정 파일을 .yaml 로 쓸 때만 필요(없으면 .json 사용).
