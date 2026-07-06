@@ -59,15 +59,17 @@ spec:
   groups:
     - name: gpu-monitor.rules
       rules:
-        # 모니터 자체가 안 보임(스크레이프 실패) — 메트릭 부재가 '정상'으로 오인되지 않게.
-        # 참고: gpu_monitor_up 메트릭이 없어 Prometheus 생성 up{} 만으로 판정한다.
+        # 모니터 자체가 안 보임 — 메트릭 부재가 '정상'으로 오인되지 않게.
+        # gpu_monitor_up 메트릭이 없어 Prometheus 생성 up{} 로 판정한다. up==0 만으로는
+        # '타깃이 발견됐는데 스크레이프 실패'만 잡히고, PodMonitor 라벨/셀렉터가 안 맞아
+        # 타깃이 아예 발견 안 되면 up{} 시계열 자체가 없어 알럿이 침묵한다 → absent() 로 보강.
         - alert: GpuMonitorDown
-          expr: up{job="gpu-monitor"} == 0
+          expr: up{job="gpu-monitor"} == 0 or absent(up{job="gpu-monitor"})
           for: 5m
           labels: {severity: critical}
           annotations:
-            summary: "gpu-monitor 가 응답하지 않음"
-            description: "스크레이프 실패 또는 첫 수집 전. 대시보드/메트릭 데이터가 stale 일 수 있음."
+            summary: "gpu-monitor 가 응답하지 않음(스크레이프 실패 또는 타깃 미발견)"
+            description: "스크레이프 실패·첫 수집 전·PodMonitor 미발견 중 하나. 대시보드/메트릭이 stale 이거나 부재."
 
         # 클러스터 GPU 완전 소진: 유휴 0 이 지속. 신규 GPU 워크로드가 Pending 으로 쌓임.
         # 주의: 노드의 Pod 조회가 실패하면 그 노드가 '전량 유휴'로 잡혀 free 가 과대 계상될 수
@@ -83,6 +85,8 @@ spec:
             description: "클러스터 유휴 GPU 가 0 인 상태로 15분 이상. 신규 GPU 워크로드가 Pending 으로 쌓일 수 있음."
 
         # 고할당 경고: 할당률 90% 초과 지속 — 여유가 거의 없음(소진 임박).
+        # 주의: ClusterGpuExhausted 와 마찬가지로, 노드 Pod 조회 실패 시 그 노드가 allocated=0
+        #   으로 잡혀 할당률이 실제보다 낮게 계산된다 → 이 알럿도 '과소 경보' 방향(미탐 가능).
         - alert: ClusterGpuHighAllocation
           expr: |
             gpu_monitor_cluster_gpu_allocated

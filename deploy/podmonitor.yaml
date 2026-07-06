@@ -1,0 +1,31 @@
+# PodMonitor (kube-prometheus-stack) — Service 를 거치지 않고 Pod 를 직접 스크레이프.
+# core 매니페스트(deploy/k8s.yaml)에서 분리했다: monitoring.coreos.com CRD 가 없으면
+# 'kubectl apply' 가 이 리소스에서 비-0 종료코드를 내기 때문. Prometheus Operator 가
+# 설치된 클러스터에서만 별도로 적용한다:
+#   kubectl apply -f deploy/podmonitor.yaml
+#
+# 주의(1): `release` 라벨이 클러스터 Prometheus 의 podMonitorSelector 와 맞아야 스크레이프된다
+#   (kube-prometheus-stack 기본은 release=<헬름 릴리스명> — 실제 값으로 교체).
+# 주의(2): gpu-monitor 의 /metrics 는 현재 "무인증"이다(model-monitor 의 MONITOR_METRICS_TOKEN
+#   Bearer 보호 미이식) → PodMonitor 에 authorization 없음. 보호하려면 auth 이식 + authorization
+#   추가, 그리고 NetworkPolicy 로 스크레이프 소스를 제한(단 Ingress 경로는 별도로 막아야 함).
+# ServiceMonitor 로 대체하려면 deploy/prometheus-alerts.yaml 의 예시 참고(둘 중 하나만 활성).
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: gpu-monitor
+  namespace: gpu-monitor
+  labels:
+    release: kube-prometheus-stack     # ← Prometheus podMonitorSelector 에 맞게 교체
+spec:
+  selector:
+    matchLabels: { app: gpu-monitor }
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 30s                    # refresh(15s)보다 길게 — 스크레이프는 캐시만 포맷해 가볍다
+      relabelings:
+        # up{job="gpu-monitor"} 알럿(prometheus-alerts.yaml)이 이 라벨을 본다.
+        - targetLabel: job
+          replacement: gpu-monitor

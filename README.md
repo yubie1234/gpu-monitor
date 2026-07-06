@@ -41,9 +41,9 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 
 ## 필요한 RBAC
 
-읽기 전용, cluster-scope:
+읽기 전용, cluster-scope (컬렉션 조회만 하므로 `list` 만 필요):
 
-- `nodes`: `get`, `list`
+- `nodes`: `list`
 - `pods`: `list` (전 네임스페이스 — `fieldSelector=spec.nodeName` 로 노드별 조회)
 
 ## 배포 (in-cluster)
@@ -52,16 +52,21 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 
 ```bash
 ./ci.sh && ./push.sh                  # 이미지 빌드 -> 사내 레지스트리 push
-kubectl apply -f deploy/k8s.yaml      # Namespace/SA/ClusterRole(+Binding)/Deployment/Service/Ingress/PodMonitor
+kubectl apply -f deploy/k8s.yaml      # Namespace/SA/ClusterRole(+Binding)/Deployment/Service/Ingress
+kubectl apply -f deploy/podmonitor.yaml          # (선택) PodMonitor — Prometheus Operator 있을 때만
 kubectl apply -f deploy/prometheus-alerts.yaml   # (선택) PrometheusRule
 ```
 
-- 위 RBAC(nodes/pods 읽기)은 `deploy/k8s.yaml` 의 ClusterRole 로 함께 배포된다. 없으면 앱이
-  토큰은 있어도 조회에 실패하니 반드시 적용.
+- 위 RBAC(nodes/pods `list`)은 `deploy/k8s.yaml` 의 ClusterRole 로 함께 배포된다. 없으면 앱이
+  토큰은 있어도 조회가 403 → 에러 없이 **빈 데이터**로 뜨니(readyz 는 200 유지) 반드시 적용.
 - 컨테이너는 포트 **8089 고정**(Dockerfile ENTRYPOINT) — `MONITOR_PORT` env 는 컨테이너에선
   무시된다. Service/probe 도 8089 기준.
-- `/metrics` 는 현재 **무인증**이다(형제 프로젝트의 metrics 토큰 인증 미이식). 노출이 걱정되면
-  NetworkPolicy 로 스크레이프 소스를 제한할 것.
+- `PodMonitor` 는 `monitoring.coreos.com` CRD 의존이라 core 매니페스트에서 분리했다 — Operator
+  없이 `k8s.yaml` 만 적용해도 실패하지 않는다.
+- 이미지 태그 주의: `:latest` 는 **product 라인 전용**이다. develop/feature 빌드를 배포하려면
+  `deploy/k8s.yaml` 의 `image` 를 그 브랜치 태그(`:<version>-<branch>`)로 바꿀 것.
+- `/metrics`·`/api/snapshot` 은 현재 **무인증**이다(형제 프로젝트의 metrics 토큰 인증 미이식).
+  Ingress 로 외부 노출하면 이 경로들도 공개되니, 민감하면 경로 제한/인증 프록시/내부 전용으로 둘 것.
 - MIG / time-slicing 노드 대응은 아직 없다 — [docs/gpu-sharing-plan.md](docs/gpu-sharing-plan.md) 참고.
 
 ## 테스트
