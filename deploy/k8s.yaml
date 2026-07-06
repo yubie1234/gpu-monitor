@@ -1,0 +1,194 @@
+# gpu-monitor in-cluster 배포 매니페스트
+#
+# 전제: 이미지가 레지스트리(10.92.20.77:5002)에 올라가 있어야 한다.
+#   ./ci.sh && ./push.sh
+#   # imagePullPolicy: Always 라 :latest 최신본을 매번 받는다.
+#   # HTTP(비TLS) 레지스트리면 노드 containerd 에 insecure-registry(10.92.20.77:5002) 설정 필요.
+# 적용:
+#   kubectl apply -f deploy/k8s.yaml
+#
+# 이 앱은 "할당(allocation)"만 본다 — Pod resources.limits/requests 의 nvidia.com/gpu 수.
+# DCGM 류 실사용률(%, VRAM, 온도)은 다루지 않는다. 그래서 필요한 RBAC 도 nodes/pods 읽기뿐.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-monitor
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-monitor
+  namespace: gpu-monitor
+---
+# 필요한 최소 권한(읽기 전용, cluster-scope).
+#   - nodes: GPU capacity/allocatable(status) + 장치명(라벨 nvidia.com/gpu.product)
+#   - pods : 노드별 GPU 점유(spec.containers[].resources[nvidia.com/gpu]) 집계
+# 앱은 fieldSelector=spec.nodeName 로 노드별 Pod 를 조회하므로 pods 는 전 네임스페이스 list 가 필요.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: gpu-monitor-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: gpu-monitor-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gpu-monitor-reader
+subjects:
+  - kind: ServiceAccount
+    name: gpu-monitor
+    namespace: gpu-monitor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-monitor
+  namespace: gpu-monitor
+  labels:
+    app: gpu-monitor
+    app.kubernetes.io/name: gpu-monitor
+    app.kubernetes.io/version: "0.1.0"   # app/__init__.py __version__ 과 맞출 것
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: gpu-monitor }
+  template:
+    metadata:
+      labels:
+        app: gpu-monitor
+        app.kubernetes.io/name: gpu-monitor
+        app.kubernetes.io/version: "0.1.0"
+    spec:
+      serviceAccountName: gpu-monitor
+      containers:
+        - name: gpu-monitor
+          # ci.sh 로 빌드 -> push.sh 로 레지스트리에 올린 이미지.
+          # ENTRYPOINT 가 uvicorn app.main:app --port 8089 로 포트를 고정하므로(Dockerfile),
+          # 컨테이너에서 MONITOR_PORT/MONITOR_HOST env 는 무시된다 — 포트는 8089 고정.
+          image: 10.92.20.77:5002/ai-tool/gpu-monitor:latest
+          imagePullPolicy: Always
+          env:
+            # 백그라운드 수집 주기(초). 할당은 급변하지 않으니 15~30s 권장.
+            - { name: MONITOR_INTERVAL, value: "15" }
+            # GPU 노드만 조회하도록 서버측 필터(선택). GFD/GPU Operator 라벨 예시.
+            # 미설정이면 전체 노드를 받아 capacity>0 노드만 남긴다.
+            # - { name: MONITOR_NODE_SELECTOR, value: "nvidia.com/gpu.present=true" }
+            # path prefix 뒤 노출(아래 Ingress 와 동일 prefix). 루트로 쓰려면 이 줄 제거.
+            - { name: MONITOR_ROOT_PATH, value: "/service/gpu-monitor" }
+          ports:
+            - { containerPort: 8089, name: http }
+          # startupProbe: lifespan 이 "첫 수집 완료"까지 서버 기동을 블록한다
+          #   (app/services/state.py:start -> _refresh_once 를 await). 대형 클러스터에서
+          #   첫 수집은 노드 수 × per-node Pod 조회라 수십 초~수 분이 걸릴 수 있는데,
+          #   그동안 HTTP 서버가 리슨하지 않으므로 liveness 가 곧장 실패해 죽는 것을 막는다.
+          #   periodSeconds×failureThreshold = 최대 대기( 5s×60 = 5분 ) 안에 첫 수집이
+          #   끝나면 정상. 노드가 매우 많으면 failureThreshold 를 올릴 것.
+          startupProbe:
+            httpGet: { path: /healthz, port: 8089 }
+            periodSeconds: 5
+            failureThreshold: 60
+          # readiness: 첫 스냅샷이 생겨야 200(/readyz). 그전엔 503 → 트래픽 차단.
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8089 }
+            periodSeconds: 10
+          # liveness: 프로세스 생존만 확인(/healthz 는 항상 200). startupProbe 성공 후 시작.
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8089 }
+            periodSeconds: 20
+          resources:
+            # 스냅샷 하나에 전체 노드 + GPU 점유 Pod 를 담는다. 노드/Pod 가 수백~수천이면
+            # 메모리 상한을 올릴 것(응답 JSON 이 커진다). CPU 는 폴링 위주라 낮아도 됨.
+            requests: { cpu: "50m", memory: "96Mi" }
+            limits: { cpu: "500m", memory: "256Mi" }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-monitor
+  namespace: gpu-monitor
+spec:
+  selector: { app: gpu-monitor }
+  ports:
+    - { port: 80, targetPort: 8089, name: http }
+---
+# path prefix 뒤로 노출: http(s)://<any-host>/service/gpu-monitor  (host 미지정 = 모든 도메인)
+#
+# 동작: nginx ingress 가 prefix(/service/gpu-monitor)를 rewrite 로 떼고 앱(루트)에 전달한다.
+#       앱은 MONITOR_ROOT_PATH 로 같은 prefix 를 알고 있어, 대시보드 자기 호출(fetch
+#       /api/snapshot 등)에 prefix 를 붙인다 -> 브라우저가 <host>/service/gpu-monitor/...
+#       로 요청 -> ingress 가 다시 떼어 앱에 전달.
+#
+# 전제: nginx ingress controller. 다른 컨트롤러면 rewrite 주석/문법을 맞게 바꿀 것.
+#   - host 미지정이라 모든 도메인을 받는다. 특정 도메인만 받으려면 rules 에 host: 추가.
+#   - ingressClassName(nginx) 은 실제 환경 값으로 교체.
+#   - TLS 를 쓰면 spec.tls 블록 추가.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: gpu-monitor
+  namespace: gpu-monitor
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /service/gpu-monitor(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: gpu-monitor
+                port:
+                  number: 80
+# TLS 예시(인증서 Secret 준비 후 주석 해제):
+# spec:
+#   tls:
+#     - hosts: [<도메인>]
+#       secretName: gpu-monitor-tls
+---
+# PodMonitor (kube-prometheus-stack) — Service 를 거치지 않고 Pod 를 직접 스크레이프.
+#
+# 주의(1): monitoring.coreos.com CRD 라서 Prometheus Operator 가 설치돼 있어야 apply 된다.
+#   없으면 이 리소스만 실패하고 나머지는 정상 적용된다.
+# 주의(2): `release` 라벨이 클러스터 Prometheus 의 podMonitorSelector 와 맞아야 스크레이프된다
+#   (kube-prometheus-stack 기본은 release=<헬름 릴리스명> — 실제 값으로 교체).
+# 주의(3): gpu-monitor 의 /metrics 는 현재 "무인증"이다. model-monitor 와 달리
+#   MONITOR_METRICS_TOKEN(Bearer 보호)이 이식되지 않았다 → PodMonitor 에 authorization 없음.
+#   metrics 를 보호하려면 NetworkPolicy 로 스크레이프 소스를 제한하거나 auth 를 이식할 것.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: gpu-monitor
+  namespace: gpu-monitor
+  labels:
+    release: kube-prometheus-stack     # ← Prometheus podMonitorSelector 에 맞게 교체
+spec:
+  selector:
+    matchLabels: { app: gpu-monitor }
+  podMetricsEndpoints:
+    - port: http
+      path: /metrics
+      interval: 30s                    # refresh(15s)보다 길게 — 스크레이프는 캐시만 포맷해 가볍다
+      relabelings:
+        # up{job="gpu-monitor"} 알럿(prometheus-alerts.yaml)이 이 라벨을 본다.
+        - targetLabel: job
+          replacement: gpu-monitor

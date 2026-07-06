@@ -1,0 +1,94 @@
+# gpu-monitor — Prometheus 스크레이프 설정 + 알림 룰 예시
+#
+# gpu-monitor 는 /metrics 를 노출한다(기본 ON, 끄려면 MONITOR_METRICS=false).
+# 요청 경로에서 수집하지 않고 백그라운드 캐시 스냅샷을 포맷만 하므로 스크레이프가 가볍다.
+#
+# 노출 메트릭(app/services/prometheus.py):
+#   gpu_monitor_build_info{version}                       # 항상 1 (버전 라벨)
+#   gpu_monitor_cluster_gpu_capacity                      # 클러스터 총 GPU
+#   gpu_monitor_cluster_gpu_allocated                     # 할당된 GPU
+#   gpu_monitor_cluster_gpu_free                          # 유휴 GPU
+#   gpu_monitor_node_gpu{node,product,state}              # 노드별 capacity/allocated/free
+#   gpu_monitor_gpu_allocated_by_type{type}               # 워크로드 타입별 할당
+#
+# ⚠ 관측성 공백(현재 미구현): 수집 성공/실패 지표(gpu_monitor_up, *_collect_errors)와
+#   마지막 성공 시각(*_last_success_timestamp)이 없다. 따라서:
+#     - "모니터가 죽었는지"는 Prometheus 가 만드는 up{job="gpu-monitor"} 로만 판정 가능.
+#     - "데이터가 stale 한지"(수집이 조용히 실패해 옛 스냅샷이 유지되는 상황)는 메트릭으로
+#       탐지할 수 없다. 이 신호가 필요하면 형제 프로젝트 model-monitor 처럼 up/collect_errors/
+#       last_success_timestamp 게이지를 이식할 것(deploy/../docs/gpu-sharing-plan.md 참고).
+# ---------------------------------------------------------------------------
+
+# === 1) 스크레이프 설정 (Prometheus Operator 없이 쓸 때, prometheus.yml) ======
+# scrape_configs:
+#   - job_name: gpu-monitor
+#     metrics_path: /metrics
+#     scrape_interval: 30s
+#     static_configs:
+#       - targets: ["gpu-monitor.gpu-monitor.svc.cluster.local:80"]
+#
+# kube-prometheus-stack 을 쓰면 PodMonitor(deploy/k8s.yaml) 또는 아래 ServiceMonitor 중
+# 하나만 활성화한다.
+# ---
+# apiVersion: monitoring.coreos.com/v1
+# kind: ServiceMonitor
+# metadata:
+#   name: gpu-monitor
+#   namespace: gpu-monitor
+#   labels: {release: kube-prometheus-stack}
+# spec:
+#   selector:
+#     matchLabels: {app: gpu-monitor}
+#   endpoints:
+#     - port: http
+#       path: /metrics
+#       interval: 30s
+#       relabelings:
+#         - {targetLabel: job, replacement: gpu-monitor}
+
+# === 2) 알림 룰 (PrometheusRule / rule_files) ==============================
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gpu-monitor-rules
+  namespace: gpu-monitor
+  labels:
+    release: kube-prometheus-stack     # ← Prometheus ruleSelector 에 맞게 교체
+spec:
+  groups:
+    - name: gpu-monitor.rules
+      rules:
+        # 모니터 자체가 안 보임(스크레이프 실패) — 메트릭 부재가 '정상'으로 오인되지 않게.
+        # 참고: gpu_monitor_up 메트릭이 없어 Prometheus 생성 up{} 만으로 판정한다.
+        - alert: GpuMonitorDown
+          expr: up{job="gpu-monitor"} == 0
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "gpu-monitor 가 응답하지 않음"
+            description: "스크레이프 실패 또는 첫 수집 전. 대시보드/메트릭 데이터가 stale 일 수 있음."
+
+        # 클러스터 GPU 완전 소진: 유휴 0 이 지속. 신규 GPU 워크로드가 Pending 으로 쌓임.
+        # 주의: 노드의 Pod 조회가 실패하면 그 노드가 '전량 유휴'로 잡혀 free 가 과대 계상될 수
+        #   있다(수집 실패 시 알려진 한계) → free==0 알럿은 '과소 경보' 방향이라 안전하다.
+        - alert: ClusterGpuExhausted
+          expr: |
+            gpu_monitor_cluster_gpu_free == 0
+            and gpu_monitor_cluster_gpu_capacity > 0
+          for: 15m
+          labels: {severity: warning}
+          annotations:
+            summary: "클러스터 GPU 유휴 0 (완전 소진)"
+            description: "클러스터 유휴 GPU 가 0 인 상태로 15분 이상. 신규 GPU 워크로드가 Pending 으로 쌓일 수 있음."
+
+        # 고할당 경고: 할당률 90% 초과 지속 — 여유가 거의 없음(소진 임박).
+        - alert: ClusterGpuHighAllocation
+          expr: |
+            gpu_monitor_cluster_gpu_allocated
+              / clamp_min(gpu_monitor_cluster_gpu_capacity, 1) > 0.9
+          for: 30m
+          labels: {severity: warning}
+          annotations:
+            summary: "클러스터 GPU 할당률 90% 초과"
+            description: "할당률 {{ $value | humanizePercentage }} 가 30분 이상. GPU 증설 또는 워크로드 정리 검토."

@@ -46,6 +46,24 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 - `nodes`: `get`, `list`
 - `pods`: `list` (전 네임스페이스 — `fieldSelector=spec.nodeName` 로 노드별 조회)
 
+## 배포 (in-cluster)
+
+`deploy/` 에 매니페스트가 있다:
+
+```bash
+./ci.sh && ./push.sh                  # 이미지 빌드 -> 사내 레지스트리 push
+kubectl apply -f deploy/k8s.yaml      # Namespace/SA/ClusterRole(+Binding)/Deployment/Service/Ingress/PodMonitor
+kubectl apply -f deploy/prometheus-alerts.yaml   # (선택) PrometheusRule
+```
+
+- 위 RBAC(nodes/pods 읽기)은 `deploy/k8s.yaml` 의 ClusterRole 로 함께 배포된다. 없으면 앱이
+  토큰은 있어도 조회에 실패하니 반드시 적용.
+- 컨테이너는 포트 **8089 고정**(Dockerfile ENTRYPOINT) — `MONITOR_PORT` env 는 컨테이너에선
+  무시된다. Service/probe 도 8089 기준.
+- `/metrics` 는 현재 **무인증**이다(형제 프로젝트의 metrics 토큰 인증 미이식). 노출이 걱정되면
+  NetworkPolicy 로 스크레이프 소스를 제한할 것.
+- MIG / time-slicing 노드 대응은 아직 없다 — [docs/gpu-sharing-plan.md](docs/gpu-sharing-plan.md) 참고.
+
 ## 테스트
 
 ```bash
