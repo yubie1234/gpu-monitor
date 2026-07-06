@@ -155,6 +155,11 @@ const TYPE_COLORS = {
   Deployment:"#3fb950", StatefulSet:"#3fb950", DaemonSet:"#2ea043"
 };
 function typeColor(t){ return TYPE_COLORS[t] || "#8b97a7"; }
+
+// 장치(제품)별 색 — 워크로드 타입 팔레트와 겹치지 않는 별도 카테고리 팔레트.
+// 제품 등장 순서대로 배정(순환), 세그먼트 바와 범례가 같은 색을 쓴다.
+const PRODUCT_COLORS = ["#b083f0","#4cc4c0","#e8935a","#e070b0","#6cc0e8","#a0c85a","#d0a860"];
+function productColor(i){ return PRODUCT_COLORS[i % PRODUCT_COLORS.length]; }
 function typeClass(t){
   const k=String(t||"").toLowerCase();
   if(["kserve","job","notebook","deployment","statefulset"].includes(k)) return k;
@@ -180,14 +185,15 @@ function render(snap){
   const cap=s.gpu_capacity||0, alloc=s.gpu_allocated||0, free=s.gpu_free||0;
   const pct = cap? Math.round(alloc/cap*100):0;
 
-  // 장치별 세그먼트 바 (capacity 기준)
+  // 장치별 세그먼트 바 (capacity 기준) — 제품마다 고유 색.
   const products = s.products || {};
   const prodKeys = Object.keys(products);
   let prodBar="", prodLeg="";
-  prodKeys.forEach(p=>{
+  prodKeys.forEach((p,i)=>{
+    const c = productColor(i);
     const w = cap? (products[p].capacity/cap*100):0;
-    prodBar += '<i style="width:'+w+'%;background:'+typeColor("Notebook")+';opacity:.55"></i>';
-    prodLeg += '<span><i style="background:'+ "#b083f0" +'"></i>'+esc(p)+' '+n(products[p].capacity)+'</span>';
+    prodBar += '<i title="'+esc(p)+' · '+n(products[p].capacity)+' GPU" style="width:'+w+'%;background:'+c+'"></i>';
+    prodLeg += '<span><i style="background:'+c+'"></i>'+esc(p)+' '+n(products[p].capacity)+'</span>';
   });
 
   // 타입별 할당 세그먼트 바 (allocated 기준)
