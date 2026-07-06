@@ -25,9 +25,14 @@ GFD(GPU Feature Discovery) + device-plugin 이 노드 status(리소스)와 라�
 |---|---|---|---|---|
 | **Whole GPU**(기본) | `nvidia.com/gpu` | 물리 GPU 수 | `nvidia.com/gpu.product=NVIDIA-H100-80GB-HBM3` | ✅ 정상 |
 | **Time-slicing** `renameByDefault=false`(기본) | `nvidia.com/gpu` | 물리 × replicas (부풀려짐) | product 에 `-SHARED` 접미, `nvidia.com/gpu.replicas`, `nvidia.com/gpu.count`, `nvidia.com/gpu.sharing-strategy=time-slicing` | ⚠ 집계는 되나 capacity 가 물리수 아님 |
-| **Time-slicing** `renameByDefault=true` / **MPS** | `nvidia.com/gpu.shared` | 논리 슬롯 수 | product `-SHARED`, `sharing-strategy=time-slicing`\|`mps` | ❌ 노드 소멸(capacity 0) |
+| **Time-slicing** `renameByDefault=true` / **MPS** | `nvidia.com/gpu.shared` | 논리 슬롯 수 | product 라벨 **미변경**(접미 없음), `sharing-strategy=time-slicing`\|`mps` | ❌ 노드 소멸(capacity 0) |
 | **MIG single** | `nvidia.com/gpu` | MIG 인스턴스 수(예 8×7=56) | product 에 `-MIG-1g.10gb` 등, `nvidia.com/mig.strategy=single` | ⚠ 집계는 되나 물리수 아님 |
 | **MIG mixed** | `nvidia.com/mig-1g.5gb`, `nvidia.com/mig-2g.10gb`, … | 프로파일별 인스턴스 수 | `nvidia.com/mig.strategy=mixed`, `nvidia.com/mig-<profile>.count` | ❌ 노드 소멸(gpu 키 0) |
+
+> **NVIDIA 규격 주의**: `-SHARED` 접미는 `renameByDefault=false`(기본, 리소스명은 `nvidia.com/gpu`
+> 유지) 일 때만 product 라벨에 붙는다. `renameByDefault=true`(리소스명이 `nvidia.com/gpu.shared`
+> 로 바뀜)에서는 product 라벨이 **변경되지 않는다**. 즉 공유 모드 판별은 product 접미가 아니라
+> **리소스명(`.shared`) + `nvidia.com/gpu.sharing-strategy` 라벨**을 우선 신호로 삼아야 한다.
 
 핵심 구분: **물리 GPU 수**(사람이 "GPU 몇 장"이라 할 때의 수)와 **스케줄 가능한 논리 단위
 수**(k8s 가 세는 수)가 공유 모드에서 갈라진다. 할당 모니터의 산수(allocated/free)는 논리
@@ -87,9 +92,11 @@ A 의 탐지 + 공유 모드 노드에는 노드별 배지/경고("MIG/공유 �
   - `GPU_RESOURCES` 매처 도입: 정확 키 `nvidia.com/gpu`·`nvidia.com/gpu.shared` + prefix
     `nvidia.com/mig-`. `pod_gpu`/`node_gpu` 가 매칭 키를 모두 합산.
   - `node_gpu` 가 라벨에서 `gpu.count`(물리), `gpu.replicas`, `mig.strategy`,
-    `sharing-strategy` 를 읽어 `mode` 와 `gpu_physical` 도출.
-  - `short_gpu_product` 는 `-SHARED`/`-MIG-` 접미를 **보존하거나 별도 배지로** — 첫 토큰
-    절단 규칙을 공유 모드에서 조건부로 완화.
+    `sharing-strategy` 를 읽어 `mode` 와 `gpu_physical` 도출. **모드 판별은 리소스명
+    (`.shared`, `mig-*`) + `sharing-strategy`/`mig.strategy` 라벨을 우선 신호로** 삼는다
+    (product 접미는 renameByDefault=true 에선 없으므로 보조 신호로만).
+  - `short_gpu_product` 는 `-MIG-` 접미(및 renameByDefault=false 의 `-SHARED`)를 **보존하거나
+    별도 배지로** — 첫 토큰 절단 규칙을 공유 모드에서 조건부로 완화.
 - **`collect.py`**
   - capacity 필터를 "매칭 리소스 중 하나라도 >0" 으로 확대(현 `if not g["capacity"]`).
   - 노드 dict 에 `mode`, `gpu_physical` 추가.
