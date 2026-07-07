@@ -48,60 +48,17 @@ GPU 사용률(%), VRAM 사용량, 온도, power/클럭. 스냅샷에 원천 데�
 
 ## 3. Grafana 대시보드 패널 설계
 
-신규 `deploy/grafana-dashboard.json` — `model-monitor` 구조(row 4단, 어노테이션 오버레이, refresh 30s, shared tooltip)를 미러링. 템플릿 변수: `label_values(gpu_monitor_node_gpu, node)`, `label_values(gpu_monitor_node_gpu, product)`, (신규 도입 시) `label_values(gpu_monitor_gpu_allocated_by_namespace, namespace)`. 패널 쿼리에 `{node=~"$node", product=~"$product"}` 필터.
-
-> **할당률(%)은 사용률이 아니다** — `allocated/capacity`. **임계 방향이 model-monitor 와 반대**: 높을수록 위험(스케줄 headroom 소진). thresholds 를 그대로 복사하지 말고 free 소진 관점으로 뒤집을 것(예 70/90).
-
-### 클러스터 개요
-
-| 패널 | 타입 | PromQL | 필요 메트릭 |
-|---|---|---|---|
-| 총 GPU 용량 | stat | `gpu_monitor_cluster_gpu_capacity` | 기존 |
-| 할당된 GPU | stat | `gpu_monitor_cluster_gpu_allocated` | 기존 |
-| 유휴 GPU | stat (≤0 red) | `gpu_monitor_cluster_gpu_free` | 기존 |
-| 클러스터 할당률 | gauge (70/90) | `100 * gpu_monitor_cluster_gpu_allocated / clamp_min(gpu_monitor_cluster_gpu_capacity, 1)` | 기존 |
-| GPU 노드 수 | stat | `gpu_monitor_nodes` (없으면 `count(gpu_monitor_node_gpu{state="capacity"})`) | P2 / 파생 |
-| 할당·유휴·용량 추이 | timeseries | `gpu_monitor_cluster_gpu_capacity` / `_allocated` / `_free` | 기존 (Prometheus 스크레이프로 시계열 축적) |
-| 모니터 버전 | stat (`{{version}}`) | `max by(version)(gpu_monitor_build_info)` | 기존 |
-
-### 장치(제품)별
-
-| 패널 | 타입 | PromQL | 필요 메트릭 |
-|---|---|---|---|
-| 제품별 용량 분포 | piechart(donut) | `sum by(product)(gpu_monitor_node_gpu{state="capacity"})` | 기존 |
-| 제품별 할당/유휴 | bargauge | `sum by(product)(gpu_monitor_node_gpu{state=~"allocated\|free"})` | 기존 |
-| 제품별 할당률 | bargauge (70/90) | `100 * sum by(product)(gpu_monitor_node_gpu{state="allocated"}) / clamp_min(sum by(product)(gpu_monitor_node_gpu{state="capacity"}), 1)` | 기존 |
-
-### 워크로드 타입 / 네임스페이스별
-
-| 패널 | 타입 | PromQL | 필요 메트릭 |
-|---|---|---|---|
-| 타입별 할당 분포 | piechart | `gpu_monitor_gpu_allocated_by_type` | 기존 |
-| 타입별 할당 순위 | bargauge | `sort_desc(gpu_monitor_gpu_allocated_by_type)` | 기존 |
-| 타입별 할당 추이 | timeseries(stacked) | `gpu_monitor_gpu_allocated_by_type` | 기존 |
-| 네임스페이스별 할당 | bargauge | `sort_desc(gpu_monitor_gpu_allocated_by_namespace)` | **P1 신규** |
-| (선택) 워크로드별 점유 | bargauge / table | `gpu_monitor_workload_gpu` (legend `{{workload}} ({{namespace}})`) | **P3 신규** |
-
-### 노드별
-
-| 패널 | 타입 | PromQL | 필요 메트릭 |
-|---|---|---|---|
-| 노드별 할당 현황 | table | `gpu_monitor_node_gpu` + Grafana transform *Labels to fields*(state → 컬럼 피벗, node/product → 행) | 기존 (PromQL 만으로 피벗 불가) |
-| 노드별 할당률 | bargauge | `100 * gpu_monitor_node_gpu{state="allocated"} / ignoring(state) clamp_min(gpu_monitor_node_gpu{state="capacity"}, 1)` | 기존 (`ignoring(state)` 로 라벨 정렬) |
-| 노드별 유휴 GPU | bargauge (`{{node}} ({{product}})`) | `gpu_monitor_node_gpu{state="free"}` | 기존 |
-| 노드 할당률 타임라인 | state-timeline (y=node) | 위 노드별 할당률 식 | 기존 (진짜 heatmap 대신 state-timeline 권장) |
-
-### 상태·이상 징후
-
-| 패널 | 타입 | PromQL | 필요 메트릭 |
-|---|---|---|---|
-| 만석(Full) 노드 수 | stat | `count(gpu_monitor_node_gpu{state="free"} == 0)` | 기존 (파생) |
-| NotReady GPU 노드 수 | stat | `count(gpu_monitor_node_ready == 0)` | **P1 신규** |
-| NotReady 손실 용량 | stat | `sum(gpu_monitor_node_gpu{state="capacity"} and on(node) (gpu_monitor_node_ready == 0))` | **P1 신규** 의존 |
-| Not-Ready Pod 점유 GPU | stat | `gpu_monitor_gpu_allocated_by_ready{ready="false"}` | **P2 신규** |
-| NotReady 노드 위 할당(anomaly) | stat | `(gpu_monitor_node_ready == 0) and on(node) (sum by(node)(gpu_monitor_node_gpu{state="allocated"}) > 0)` | **P1 신규** |
-
-수집 헬스 패널(수집 상태/오류 수/신선도)은 4절 관측성 메트릭 참조.
+> **완료(feature/metrics-observability):** `deploy/grafana-dashboard.json` 작성 —
+> row 5단(개요/장치/워크로드·네임스페이스/노드/상태·수집 헬스), 템플릿 변수
+> node/product/namespace + datasource, 알럿 어노테이션(`.*Gpu.*` — 원안의
+> `Gpu.*|Node.*` 는 앵커드 regex 라 기존 `Cluster*` 2종 미매칭), refresh 30s.
+> 원안 설계에서 반영한 것: 할당률 임계 70/90(높을수록 위험 — model-monitor 와 반대),
+> 분모는 capacity(기존 알럿과 정합), 노드 테이블은 Labels-to-fields 피벗, heatmap
+> 대신 state-timeline, 만석/NotReady stat 은 `or vector(0)` 로 No-data 방어,
+> '할당≠사용률' 텍스트 패널 고정. model-monitor 원본 JSON 이 저장소에 없어
+> 미러링이 아닌 신규 작성.
+> **남은 주의:** 수집 실패 노드는 free 시리즈가 없어 만석 stat 에 안 잡힌다 —
+> 대시보드 '노드 수집 실패' stat 및 `GpuNodeCollectError` 알럿과 함께 볼 것.
 
 ---
 
@@ -136,9 +93,6 @@ GPU 사용률(%), VRAM 사용량, 온도, power/클럭. 스냅샷에 원천 데�
 ### 코드 — 할당 메트릭
 - [ ] **[P3]** `gpu_monitor_workload_gpu{node,namespace,workload,workload_type}` — **pod 명 라벨 제외**(카디널리티). **주의:** 같은 워크로드 레플리카 여러 개가 한 노드에 있으면 동일 라벨셋 중복 방출로 exposition 이 깨진다 — 방출 전 키별 **사전 합산 필수**
 - [ ] **[P3]** (선택) `gpu_monitor_product_gpu{product,state}` — 파생 가능하므로 recording rule 우선 검토
-
-### 배포물
-- [ ] **[P1]** `deploy/grafana-dashboard.json` 신규 — row 5단(개요/장치/워크로드·ns/노드/상태·수집헬스), 어노테이션 오버레이(`.*Gpu.*`), 템플릿 변수(node/product/namespace), 할당률 분모는 capacity(기존 알럿과 정합) 명시
 
 ### 문서
 - [ ] **[P2]** README/CLAUDE.md 의 노출 메트릭 목록을 신규 메트릭으로 갱신 (할당 경계 문구 유지)
