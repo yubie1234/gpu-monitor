@@ -40,6 +40,8 @@ class Summary(BaseModel):
     gpu_free: Optional[int] = None
     products: Optional[Dict[str, Any]] = None
     by_workload_type: Optional[Dict[str, int]] = None
+    by_namespace: Optional[Dict[str, int]] = None
+    by_ready: Optional[Dict[str, int]] = None  # 키는 "true"/"false"
 
 
 class Snapshot(BaseModel):

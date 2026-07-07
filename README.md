@@ -61,11 +61,12 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 | `gpu_monitor_last_success_timestamp_seconds` | gauge (epoch) | – | 마지막 성공 수집 — 성공 이력 없으면 미방출 |
 | `gpu_monitor_refreshes_total` / `gpu_monitor_refresh_failures_total` | counter | – | refresh 시도(heartbeat) / 예상외 예외 실패 |
 
-- 알럿 룰 예시 10종: [deploy/prometheus-alerts.yaml](deploy/prometheus-alerts.yaml) ·
+- 알럿 룰 예시 11종: [deploy/prometheus-alerts.yaml](deploy/prometheus-alerts.yaml) ·
   Grafana 대시보드: [deploy/grafana-dashboard.json](deploy/grafana-dashboard.json) (import 해서 사용)
 - `failures_total`/`last_success` 는 **예상외 예외·루프 정지 전용** 신호 — 통상 수집 실패
   (RBAC, 노드 조회 실패)는 예외 없이 흡수되므로 `collect_errors`/`node_collect_error` 로 잡는다.
-- 네임스페이스·노드·워크로드명이 라벨로 노출된다 — `/metrics` 는 무인증이므로 외부 노출 시 주의(배포 절 참고).
+- 네임스페이스·노드·GPU 제품명이 라벨로 노출된다 — `/metrics` 는 무인증이므로 외부 노출 시 주의.
+  워크로드·Pod 명은 라벨엔 없지만 무인증 `/api/snapshot` 에 노출된다(배포 절 참고).
 
 ## 필요한 RBAC
 
@@ -84,7 +85,7 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 #   BRANCH=develop ./ci.sh && BRANCH=develop ./push.sh
 kubectl apply -f deploy/k8s.yaml      # Namespace/SA/ClusterRole(+Binding)/Deployment/Service/Ingress
 kubectl apply -f deploy/podmonitor.yaml          # (선택) PodMonitor — Prometheus Operator 있을 때만
-kubectl apply -f deploy/prometheus-alerts.yaml   # (선택) PrometheusRule (알럿 10종)
+kubectl apply -f deploy/prometheus-alerts.yaml   # (선택) PrometheusRule (알럿 11종)
 # Grafana: deploy/grafana-dashboard.json 을 대시보드로 import
 ```
 

@@ -15,8 +15,14 @@
   `node_ready`, `node_info`, `node_collect_error`, `nodes`, `collect_errors`,
   `k8s_enabled`, `demo`), 관측성 meta 계열(`up`/`last_success`/counter 2종) +
   `render_prometheus_metrics(snap, meta=None)`/`state.build_meta()` 배선.
-- 알럿 3종 → 10종(`deploy/prometheus-alerts.yaml`), Grafana 대시보드 신규
+- 알럿 3종 → 11종(`deploy/prometheus-alerts.yaml`), Grafana 대시보드 신규
   (`deploy/grafana-dashboard.json`, row 5단). 회귀 테스트 23 → 37개.
+- 셀프 리뷰(4관점 + 적대적 검증)에서 확정된 10건 반영: `GpuMonitorDown` for 10m
+  (startupProbe 예산 300s 와 마진 0 이던 것) + `absent()` 를 `GpuMonitorTargetMissing`
+  으로 분리(브랜치 전환 시 for 리셋 방지), 합성 폴백 스냅샷 오도 방지 `up==1` 가드
+  (K8sDisabled/CollectErrors), 클러스터 알럿 instance/pod 라벨 집계 제거(재배포 시
+  for 리셋 방지), Grafana 테이블 피벗 `format:"table"` 제거·state-timeline color
+  mode·제품 패널 `$node` 필터, schemas `Summary` 에 by_namespace/by_ready 반영.
 - **원안에서 정정한 것:** `GpuClusterNoFreeCapacity` 미추가(기존 `ClusterGpuExhausted`
   와 동일 조건 + `capacity>0` 가드 누락 오발화), `GpuMonitorDown` 의 `absent()` 가드
   유지, `GpuMonitorStale` 임계는 스크레이프 주기 기준 75s(refresh 기준 45s 는 플랩),

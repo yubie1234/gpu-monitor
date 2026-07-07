@@ -66,20 +66,32 @@ spec:
       rules:
         # ── 모니터 헬스 ──────────────────────────────────────────────────
         # 모니터 자체가 안 보임 — 메트릭 부재가 '정상'으로 오인되지 않게.
-        # up==0 만으로는 '타깃이 발견됐는데 스크레이프 실패'만 잡히고, PodMonitor
-        # 라벨/셀렉터가 안 맞아 타깃이 아예 발견 안 되면 up{} 시계열 자체가 없어
-        # 알럿이 침묵한다 → absent() 로 보강(제거 금지). gpu_monitor_up==0 은
-        # 프로세스는 떴는데 스냅샷이 한 번도 안 만들어진 상태(Refresher 미기동).
+        # gpu_monitor_up==0 은 프로세스는 떴는데 스냅샷이 한 번도 안 만들어진 상태.
+        # 불변식: for > startupProbe 예산(deploy/k8s.yaml 5s×60=300s) — 첫 수집이
+        #   서버 리슨을 블록하므로 리슨 전 구간 내내 up==0 이다(PodMonitor 는 readiness
+        #   와 무관하게 Running Pod 를 즉시 스크레이프). for 가 예산 이하면 정상 기동·
+        #   롤링 업데이트에서 critical 오발화. k8s.yaml 의 failureThreshold 를 올리면
+        #   이 for 도 같이 올릴 것.
         - alert: GpuMonitorDown
           expr: |
             up{job="gpu-monitor"} == 0
-            or absent(up{job="gpu-monitor"})
             or gpu_monitor_up == 0
-          for: 5m
+          for: 10m
           labels: {severity: critical}
           annotations:
             summary: "gpu-monitor 가 응답하지 않거나 스냅샷이 없음"
-            description: "스크레이프 실패·타깃 미발견·첫 수집 전 중 하나. 대시보드/메트릭이 stale 이거나 부재."
+            description: "스크레이프 실패 또는 첫 수집 전 상태 지속. 대시보드/메트릭이 stale 이거나 부재."
+
+        # 타깃 미발견: PodMonitor 라벨/셀렉터가 안 맞으면 up{} 시계열 자체가 없어
+        # 위 룰이 침묵한다 → absent() 는 별도 룰로 분리(같은 룰의 or 브랜치로 두면
+        # up==0 ↔ absent 전환 때 라벨셋이 달라 for 타이머가 리셋되어 허위 RESOLVED).
+        - alert: GpuMonitorTargetMissing
+          expr: absent(up{job="gpu-monitor"})
+          for: 5m
+          labels: {severity: critical}
+          annotations:
+            summary: "gpu-monitor 스크레이프 타깃 미발견"
+            description: "up{job=\"gpu-monitor\"} 시계열 부재 — PodMonitor/ServiceMonitor 셀렉터·relabeling 확인."
 
         # 수집 정체(무음 stale): 마지막 성공 수집이 오래됨. 임계 75s = 스크레이프
         # 주기 30s(podmonitor.yaml) × 2 + 여유 15s — refresh 주기(15s) 기준으로
@@ -112,9 +124,14 @@ spec:
             description: "build_snapshot 이 예상외 예외를 던지는 중. 스냅샷이 갱신되지 않고 있을 수 있음."
 
         # k8s 클라이언트 비활성: SA 토큰 없음/클러스터 밖 실행 → 데이터 전부 빔.
-        # demo 배포(gpu_monitor_demo==1)도 k8s_enabled==0 이므로 제외한다.
+        # demo 배포(gpu_monitor_demo==1)도 k8s_enabled==0 이므로 제외.
+        # up==1 가드: 스토어가 빈 동안 라우트 폴백 스냅샷이 k8s_enabled=0 을 합성
+        # 방출하므로, 스냅샷이 실존할 때만 평가한다(그 상태는 GpuMonitorDown 담당).
         - alert: GpuMonitorK8sDisabled
-          expr: gpu_monitor_k8s_enabled == 0 and gpu_monitor_demo == 0
+          expr: |
+            gpu_monitor_k8s_enabled == 0
+            and gpu_monitor_demo == 0
+            and gpu_monitor_up == 1
           for: 10m
           labels: {severity: warning}
           annotations:
@@ -124,8 +141,14 @@ spec:
         # ── 수집 오류 (RBAC 403 등 '조용한 빈 데이터'를 알림으로 승격) ─────────
         # 노드 목록 수집 실패: RBAC 미적용/pruned/도달성 문제 → 총량 과소(0 포함).
         # readyz 는 이 상태에서도 200 을 유지하므로(빈 스냅샷 정상 저장) 이 알럿이 유일한 신호.
+        # 가드 2개: k8s 비활성이면 errors 에 안내 문구가 상시 1건이라 K8sDisabled 와
+        # 중복+오도 발화(k8s_enabled==1), 스토어 빈 동안엔 폴백 스냅샷이
+        # errors=["아직 첫 수집 전"] 을 합성하므로 up==1 일 때만 평가.
         - alert: GpuMonitorCollectErrors
-          expr: gpu_monitor_collect_errors > 0
+          expr: |
+            gpu_monitor_collect_errors > 0
+            and gpu_monitor_k8s_enabled == 1
+            and gpu_monitor_up == 1
           for: 5m
           labels: {severity: warning}
           annotations:
@@ -142,6 +165,11 @@ spec:
             description: "해당 노드 allocation 이 과소집계 중(allocated=0 으로 잡힘). 클러스터 합계·할당률도 실제보다 낮게 보임."
 
         # ── 용량 ────────────────────────────────────────────────────────
+        # 클러스터 상태 알럿은 스크레이프 식별 라벨(instance/pod)을 집계로 제거한다 —
+        # 유지하면 모니터 재배포/재스케줄마다 라벨셋이 바뀌어 for 타이머 리셋 + 허위
+        # RESOLVED 알림이 난다(주체가 클러스터지 모니터 인스턴스가 아님). 모니터 자체
+        # 헬스 알럿(Down/Stale/Stalled 등)은 인스턴스가 곧 주체라 현행 유지.
+        #
         # 클러스터 GPU 완전 소진: 유휴 0 이 지속. 신규 GPU 워크로드가 Pending 으로 쌓임.
         # 주의: 노드의 Pod 조회가 실패하면 그 노드가 '전량 유휴'로 잡혀 free 가 과대 계상될
         #   수 있다 → free==0 알럿은 '과소 경보' 방향이라 안전하고, 그 수집 실패 자체는
@@ -150,8 +178,8 @@ spec:
         #  게다가 그 식에는 capacity>0 가드가 없어 k8s 비활성 시 오발화한다.)
         - alert: ClusterGpuExhausted
           expr: |
-            gpu_monitor_cluster_gpu_free == 0
-            and gpu_monitor_cluster_gpu_capacity > 0
+            min without (instance, pod) (gpu_monitor_cluster_gpu_free) == 0
+            and max without (instance, pod) (gpu_monitor_cluster_gpu_capacity) > 0
           for: 15m
           labels: {severity: warning}
           annotations:
@@ -163,8 +191,8 @@ spec:
         #   낮게 계산된다(과소 경보 방향, 미탐 가능) — GpuNodeCollectError 와 함께 볼 것.
         - alert: ClusterGpuHighAllocation
           expr: |
-            gpu_monitor_cluster_gpu_allocated
-              / clamp_min(gpu_monitor_cluster_gpu_capacity, 1) > 0.9
+            max without (instance, pod) (gpu_monitor_cluster_gpu_allocated)
+              / clamp_min(max without (instance, pod) (gpu_monitor_cluster_gpu_capacity), 1) > 0.9
           for: 30m
           labels: {severity: warning}
           annotations:
@@ -174,9 +202,10 @@ spec:
         # ── 이상 징후 ────────────────────────────────────────────────────
         # NotReady 노드 위에 할당이 남아 있음: 점유는 됐는데 스케줄 불가(booked-but-
         # unschedulable). 노드 재기동 직후는 정상일 수 있어 for: 로 지연.
+        # min by(node): 알럿 라벨을 node 로만 남겨 모니터 재배포에 흔들리지 않게.
         - alert: GpuAllocationOnNotReadyNode
           expr: |
-            (gpu_monitor_node_ready == 0)
+            (min by (node) (gpu_monitor_node_ready) == 0)
             and on(node) (sum by (node) (gpu_monitor_node_gpu{state="allocated"}) > 0)
           for: 10m
           labels: {severity: warning}

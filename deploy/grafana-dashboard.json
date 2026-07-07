@@ -509,7 +509,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"capacity\",product=~\"$product\"})",
+          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"capacity\",product=~\"$product\",node=~\"$node\"})",
           "refId": "A",
           "legendFormat": "{{product}}"
         }
@@ -559,7 +559,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"allocated\",product=~\"$product\"})",
+          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"allocated\",product=~\"$product\",node=~\"$node\"})",
           "refId": "A",
           "legendFormat": "{{product}} 할당"
         },
@@ -568,7 +568,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"free\",product=~\"$product\"})",
+          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"free\",product=~\"$product\",node=~\"$node\"})",
           "refId": "B",
           "legendFormat": "{{product}} 유휴"
         }
@@ -612,7 +612,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "100 * sum by(product)(gpu_monitor_node_gpu{state=\"allocated\",product=~\"$product\"}) / clamp_min(sum by(product)(gpu_monitor_node_gpu{state=\"capacity\",product=~\"$product\"}), 1)",
+          "expr": "100 * sum by(product)(gpu_monitor_node_gpu{state=\"allocated\",product=~\"$product\",node=~\"$node\"}) / clamp_min(sum by(product)(gpu_monitor_node_gpu{state=\"capacity\",product=~\"$product\",node=~\"$node\"}), 1)",
           "refId": "A",
           "legendFormat": "{{product}}"
         }
@@ -934,8 +934,7 @@
           },
           "expr": "gpu_monitor_node_gpu{node=~\"$node\",product=~\"$product\"}",
           "refId": "A",
-          "instant": true,
-          "format": "table"
+          "instant": true
         }
       ],
       "transformations": [
@@ -1135,7 +1134,12 @@
           "unit": "percent",
           "custom": {
             "fillOpacity": 70
-          }
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "max": 100
         },
         "overrides": []
       },
