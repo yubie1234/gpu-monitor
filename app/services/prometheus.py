@@ -7,7 +7,12 @@ def _esc(v):
     return str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
 
 
-def render_prometheus_metrics(snap):
+def render_prometheus_metrics(snap, meta=None):
+    """snap 계열은 항상, 관측성 계열(up/last_success/counters)은 meta 가 있을 때만.
+
+    meta=None(기존 1-인자 호출)이면 관측성 라인을 전부 생략한다 — 0 으로 방출하면
+    up=0(다운 오탐)/last_success=0(staleness 즉시 오발화)이 된다.
+    """
     out = []
     snap = snap or {}
     s = snap.get("summary") or {}
@@ -95,5 +100,30 @@ def render_prometheus_metrics(snap):
     out.append("# HELP gpu_monitor_demo Demo snapshot (1=MONITOR_DEMO).")
     out.append("# TYPE gpu_monitor_demo gauge")
     out.append("gpu_monitor_demo %d" % (1 if snap.get("demo") else 0))
+
+    if meta is not None:
+        out.append("# HELP gpu_monitor_up Snapshot present in store (0=first collect pending).")
+        out.append("# TYPE gpu_monitor_up gauge")
+        out.append("gpu_monitor_up %d" % (1 if meta.get("up") else 0))
+
+        # 성공 이력이 없으면 라인 자체를 생략 — 0 방출은 staleness 즉시 오발화.
+        last = meta.get("last_success_epoch")
+        if last is not None:
+            out.append("# HELP gpu_monitor_last_success_timestamp_seconds"
+                       " Last successful refresh (unix epoch).")
+            out.append("# TYPE gpu_monitor_last_success_timestamp_seconds gauge")
+            out.append("gpu_monitor_last_success_timestamp_seconds %.3f" % float(last))
+
+        for name, key, help_ in (
+                ("gpu_monitor_refreshes_total", "refreshes",
+                 "Refresh attempts (heartbeat)."),
+                ("gpu_monitor_refresh_failures_total", "failures",
+                 "Refresh attempts failed with unexpected exception.")):
+            val = meta.get(key)
+            if val is None:
+                continue
+            out.append("# HELP %s %s" % (name, help_))
+            out.append("# TYPE %s counter" % name)
+            out.append("%s %d" % (name, int(val)))
 
     return "\n".join(out) + "\n"

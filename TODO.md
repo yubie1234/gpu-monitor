@@ -107,29 +107,13 @@ GPU 사용률(%), VRAM 사용량, 온도, power/클럭. 스냅샷에 원천 데�
 
 ## 4. 관측성(self-observability) 메트릭 + staleness 알럿
 
-수집기 자기관측. **모두 이미 캐시된 `store`/`refresher` 상태만 읽어 방출** — 스크레이프 경로에서 새 K8s 호출 없음(CLAUDE.md 준수). 이름은 `model-monitor` 형제와 정렬.
-
-**staleness 이중 신호가 핵심:** `_refresh_once` 는 예외를 조용히 삼키고 옛 스냅샷을 그대로 둔다(state.py:35). `up==1` 인 채로 대시보드가 몇 시간이고 낡을 수 있다 → `up`(스냅샷 존재 이진)과 `last_success_timestamp`(무음 정체)를 **둘 다** 둬야 "떴지만 멈춘" 상태를 잡는다.
-
-| 메트릭 | 타입 | 라벨 | 근거 / 배선 |
-|---|---|---|---|
-| `gpu_monitor_up` | gauge (0/1) | (없음) | `store.get() is not None` (state.py:14 초기 `None`). routes.py 의 `_snap` 은 빈 store 에 합성 dict(`ts=None`)를 돌려주므로 snap 만으로는 구분 불가 — **meta 로 넘겨야 함** |
-| `gpu_monitor_last_success_timestamp_seconds` | gauge (epoch) | (없음) | `snap["ts"]` 는 문자열 포맷(snapshot.py:20)이라 epoch 불가·실패 사이 미보존. `state.py` 에 `import time` → 성공 분기(state.py:33-34)에서 `store.last_success_epoch = time.time()`, **except 분기(state.py:35)에선 갱신 금지**(나이가 계속 증가) |
-| `gpu_monitor_collect_errors` | gauge | (없음) | `len(snap["errors"] or [])` (snapshot.py:21,26-28,32; nodes 조회 실패 collect.py:19-20). **snap 만으로 방출**(상태 변경 불필요) |
-| `gpu_monitor_node_collect_error` | gauge (0/1) | `node, product` | 노드 루프에서 `1 if n.get("error") else 0`. 근거: pods 조회 실패 시 `node["error"]`(collect.py:46-48) + per-node 예외(snapshot.py:36-37). 이때 그 노드의 allocated=0/free=None 으로 남아 조용히 과소집계 → 어느 노드인지 지목. 카디널리티 GPU 노드 수 한정, 안전 |
-| `gpu_monitor_k8s_enabled` | gauge (0/1) | (없음) | `snap.get("k8s_enabled")` (snapshot.py:24-25, k8s.py 토큰 없으면 client `None`). snap 만으로 방출 |
-| `gpu_monitor_refreshes_total` | **counter** | (없음) | `Refresher.refreshes` 카운터(state.py:24-29 `__init__`, `_refresh_once` 진입 state.py:31 에서 +1). heartbeat + 실패율 분모. **meta 로 전달** |
-| `gpu_monitor_refresh_failures_total` | **counter** | (없음) | `Refresher.failures`(except 분기 state.py:35 에서 +1). `rate()` 로 지속 실패 감시. meta 로 전달 |
-
-> 이 두 counter 가 유일한 counter 제안이다. 나머지는 전부 gauge — 스냅샷은 "현재 상태" 만 보관하고(Refresher 가 매 interval 통째 교체) 누적 이벤트 원천이 없다.
-> `last_success_epoch` 는 반드시 `store`/`refresher` 에 두고 실패 사이클에서 갱신하지 말 것. `build_snapshot` 안(snap)에 넣으면 k8s 비활성/부분실패 스냅샷도 매번 새 timestamp 를 찍어 정체를 가린다(snapshot.py:26-29).
-
-### 코드 변경 표면
-
-- **`app/services/prometheus.py`** — 시그니처 `render_prometheus_metrics(snap, meta=None)` 로 확장. **`meta` 는 필수 optional**: 기존 호출부 routes.py:43 와 test_gpu_monitor.py:219 가 인자 1개로 호출. `collect_errors`/`node_collect_error`/`k8s_enabled`/`node_ready`/`node_gpu{state="allocatable"}`/`by_namespace`/`by_ready`/`nodes`/`node_info` 는 snap 만으로, `up`/`last_success_timestamp`/counters 는 meta 로 방출.
-- **`app/services/snapshot.py` (`summarize`)** — `by_namespace`, `by_ready` 집계 추가(products 는 이미 있음).
-- **`app/services/state.py`** — `import time`; `SnapshotStore.last_success_epoch`; `Refresher.failures`/`refreshes`.
-- **`app/api/routes.py` (`/metrics`, routes.py:38-44)** — `store`/`refresher`(app.state 배선 main.py:40)에서 `meta = {up, last_success_epoch, failures, refreshes}` 구성해 `render` 에 전달.
+> **메트릭 구현 완료(feature/metrics-observability):** `up`(meta)/`last_success_timestamp`
+> (성공 분기만 갱신)/`collect_errors`/`node_collect_error`/`k8s_enabled`/`demo`(snap-only),
+> `refreshes_total`/`refresh_failures_total`(counter). `render_prometheus_metrics(snap,
+> meta=None)` + `state.build_meta()` 로 배선 — meta=None 이면 관측성 라인 생략(0 방출 금지).
+> **주의(구현 시 확인됨):** `build_snapshot` 은 통상 실패(RBAC 403, 노드 조회 실패)를
+> 예외로 던지지 않으므로 `failures`/`last_success` 는 예상외 예외·루프 정지 전용 신호다 —
+> 통상 수집 실패 감시는 `collect_errors`/`node_collect_error` 가 담당한다.
 
 ### PrometheusRule 알럿 (기존 `deploy/prometheus-alerts.yaml` 확장)
 
@@ -159,18 +143,9 @@ interval 기본 15s(config.py:28, state.py:27) 기준. `GpuMonitorDown`·`Cluste
 - [ ] **[P3]** `gpu_monitor_workload_gpu{node,namespace,workload,workload_type}` — **pod 명 라벨 제외**(카디널리티). **주의:** 같은 워크로드 레플리카 여러 개가 한 노드에 있으면 동일 라벨셋 중복 방출로 exposition 이 깨진다 — 방출 전 키별 **사전 합산 필수**
 - [ ] **[P3]** (선택) `gpu_monitor_product_gpu{product,state}` — 파생 가능하므로 recording rule 우선 검토
 
-### 코드 — 관측성 메트릭 (model-monitor 이식)
-- [ ] **[P1]** `render_prometheus_metrics(snap, meta=None)` 로 시그니처 확장 (routes.py·test 하위호환 위해 `meta` optional 필수)
-- [ ] **[P1]** `/metrics` 핸들러에서 `meta` 구성 + `gpu_monitor_up` 방출
-- [ ] **[P2]** `state.py`: `import time`, `SnapshotStore.last_success_epoch`(성공 분기만 갱신) → `gpu_monitor_last_success_timestamp_seconds`
-- [ ] **[P3]** `state.py`: `Refresher.refreshes`/`failures` 카운터 → `gpu_monitor_refreshes_total`/`gpu_monitor_refresh_failures_total` (counter)
-
 ### 배포물
 - [ ] **[P1]** `deploy/grafana-dashboard.json` 신규 — row 4단(개요/장치/워크로드·ns/노드/상태), 어노테이션 오버레이, 템플릿 변수(node/product/namespace), 기존 메트릭만으로 되는 패널 우선
 - [ ] **[P2]** `deploy/prometheus-alerts.yaml` 확장 — 위 알럿 세트 추가(기존 3종은 신규 메트릭으로 보강, 임계 방향 반전 주의, not-ready 는 `for:` 지연)
-
-### 테스트 (CLAUDE.md: 파싱/집계/분류 변경 시 회귀 테스트 필수)
-- [ ] **[P1]** `meta=None` 하위호환 + meta 계열(up/last_success/counters) 방출 테스트 — render 에 meta dict 직접 주입(테스트는 `app.services` 만 import; `summarize` 는 순수 dict 집계라 FakeClient 불필요)
 
 ### 문서
 - [ ] **[P2]** README/CLAUDE.md 의 노출 메트릭 목록을 신규 메트릭으로 갱신 (할당 경계 문구 유지)

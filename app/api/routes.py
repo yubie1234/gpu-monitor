@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.schemas.snapshot import Snapshot
 from app.services.prometheus import render_prometheus_metrics
+from app.services.state import build_meta
 
 router = APIRouter()
 
@@ -39,8 +40,9 @@ def snapshot_json(request: Request):
 def metrics(request: Request):
     if not request.app.state.settings.get("metrics", True):
         return PlainTextResponse("metrics disabled\n", status_code=404)
+    meta = build_meta(request.app.state.store, request.app.state.refresher)
     return PlainTextResponse(
-        render_prometheus_metrics(_snap(request)),
+        render_prometheus_metrics(_snap(request), meta),
         media_type="text/plain; version=0.0.4; charset=utf-8")
 
 

@@ -4,6 +4,7 @@ FakeClient 는 path substring 으로 응답을 라우팅한다(model-monitor 와
 파싱/집계/워크로드 분류/메트릭 로직을 고정한다.
 """
 
+import asyncio
 import unittest
 
 from app.services.gpu import (
@@ -13,6 +14,7 @@ from app.services.workload import classify_workload
 from app.services.collect import collect_allocations, collect_gpu_nodes
 from app.services.snapshot import summarize
 from app.services.prometheus import render_prometheus_metrics
+from app.services.state import Refresher, SnapshotStore, build_meta
 
 
 class FakeClient:
@@ -303,6 +305,62 @@ class TestPrometheus(unittest.TestCase):
                 self.assertNotIn(name, seen, "계열 %s 가 두 그룹으로 갈라짐" % name)
                 seen.add(name)
                 groups.append(name)
+
+
+class TestObservability(unittest.TestCase):
+    def test_render_without_meta_omits_observability(self):
+        # 1-인자 호출(하위호환) — 관측성 계열은 전부 부재해야 한다(0 방출 금지).
+        text = render_prometheus_metrics({"summary": {}, "nodes": []})
+        self.assertNotIn("gpu_monitor_up", text)
+        self.assertNotIn("gpu_monitor_last_success_timestamp_seconds", text)
+        self.assertNotIn("gpu_monitor_refreshes_total", text)
+        self.assertNotIn("gpu_monitor_refresh_failures_total", text)
+
+    def test_render_with_meta(self):
+        meta = {"up": True, "last_success_epoch": 1751852000.5,
+                "refreshes": 7, "failures": 2}
+        text = render_prometheus_metrics({"summary": {}, "nodes": []}, meta)
+        self.assertIn("gpu_monitor_up 1", text)
+        self.assertIn("gpu_monitor_last_success_timestamp_seconds 1751852000.500", text)
+        self.assertIn("# TYPE gpu_monitor_refreshes_total counter", text)
+        self.assertIn("gpu_monitor_refreshes_total 7", text)
+        self.assertIn("# TYPE gpu_monitor_refresh_failures_total counter", text)
+        self.assertIn("gpu_monitor_refresh_failures_total 2", text)
+
+    def test_render_meta_without_success_omits_timestamp(self):
+        # 성공 이력 없음 -> timestamp 라인 생략(0 방출 시 staleness 즉시 오발화).
+        meta = {"up": False, "last_success_epoch": None, "refreshes": 0, "failures": 0}
+        text = render_prometheus_metrics({"summary": {}, "nodes": []}, meta)
+        self.assertIn("gpu_monitor_up 0", text)
+        self.assertNotIn("gpu_monitor_last_success_timestamp_seconds", text)
+        self.assertIn("gpu_monitor_refreshes_total 0", text)
+
+    def test_build_meta_empty_store(self):
+        store = SnapshotStore()
+        meta = build_meta(store, Refresher({}, store, 15))
+        self.assertEqual(meta, {"up": False, "last_success_epoch": None,
+                                "refreshes": 0, "failures": 0})
+
+    def test_build_meta_after_set(self):
+        store = SnapshotStore()
+        store.set({"nodes": []})
+        self.assertTrue(build_meta(store, Refresher({}, store, 15))["up"])
+
+    def test_refresh_once_success_updates_meta(self):
+        store = SnapshotStore()
+        r = Refresher({"demo": True}, store, 15)
+        asyncio.run(r._refresh_once())
+        self.assertEqual((r.refreshes, r.failures), (1, 0))
+        self.assertIsNotNone(store.last_success_epoch)
+        self.assertTrue(store.get().get("demo"))
+
+    def test_refresh_once_failure_counts_and_keeps_last_success(self):
+        store = SnapshotStore()
+        r = Refresher(None, store, 15)   # settings=None -> build_snapshot 예외
+        asyncio.run(r._refresh_once())
+        self.assertEqual((r.refreshes, r.failures), (1, 1))
+        self.assertIsNone(store.last_success_epoch)   # 실패 사이클은 갱신 금지
+        self.assertIsNone(store.get())
 
 
 if __name__ == "__main__":
