@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import time
 
 from app.services.snapshot import build_snapshot
 
@@ -12,6 +13,9 @@ from app.services.snapshot import build_snapshot
 class SnapshotStore:
     def __init__(self):
         self._snap = None
+        # 마지막 성공 수집 시각(epoch). 실패 사이클에선 갱신하지 않는다 —
+        # 나이가 계속 늘어야 staleness 알럿이 정체를 탐지한다.
+        self.last_success_epoch = None
 
     def get(self):
         return self._snap
@@ -25,15 +29,19 @@ class Refresher:
         self.settings = settings
         self.store = store
         self.interval = max(float(interval or 15.0), 1.0)
+        self.refreshes = 0   # 매 시도 +1 (heartbeat — 루프 정지 탐지)
+        self.failures = 0    # 예상외 예외만 +1 (통상 수집 실패는 snap.errors 가 담당)
         self._task = None
         self._stop = None
 
     async def _refresh_once(self):
+        self.refreshes += 1
         try:
             snap = await asyncio.to_thread(build_snapshot, self.settings)
             self.store.set(snap)
+            self.store.last_success_epoch = time.time()
         except Exception:  # noqa: BLE001  (루프는 죽지 않는다)
-            pass
+            self.failures += 1
 
     async def _loop(self):
         while not self._stop.is_set():
@@ -56,3 +64,17 @@ class Refresher:
                 await self._task
             except Exception:  # noqa: BLE001
                 pass
+
+
+def build_meta(store, refresher):
+    """/metrics 용 관측성 meta.
+
+    up 은 반드시 스토어 원본(store.get() is None 여부)으로 판정한다 —
+    라우트의 _snap 폴백은 빈 스토어를 합성 dict 로 가려 snap 만으로는 구분 불가.
+    """
+    return {
+        "up": store.get() is not None,
+        "last_success_epoch": getattr(store, "last_success_epoch", None),
+        "refreshes": getattr(refresher, "refreshes", None),
+        "failures": getattr(refresher, "failures", None),
+    }

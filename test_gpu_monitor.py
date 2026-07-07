@@ -4,6 +4,7 @@ FakeClient 는 path substring 으로 응답을 라우팅한다(model-monitor 와
 파싱/집계/워크로드 분류/메트릭 로직을 고정한다.
 """
 
+import asyncio
 import unittest
 
 from app.services.gpu import (
@@ -13,6 +14,7 @@ from app.services.workload import classify_workload
 from app.services.collect import collect_allocations, collect_gpu_nodes
 from app.services.snapshot import summarize
 from app.services.prometheus import render_prometheus_metrics
+from app.services.state import Refresher, SnapshotStore, build_meta
 
 
 class FakeClient:
@@ -175,14 +177,18 @@ class TestSummarize(unittest.TestCase):
         return {"nodes": [
             {"name": "n1", "product": "H100", "capacity": 8, "allocatable": 8,
              "allocated": 8, "free": 0, "allocations": [
-                 {"workload_type": "KServe", "gpu": 8}]},
+                 {"workload_type": "KServe", "gpu": 8, "namespace": "kserve",
+                  "ready": True}]},
             {"name": "n2", "product": "H100", "capacity": 8, "allocatable": 8,
              "allocated": 3, "free": 5, "allocations": [
-                 {"workload_type": "Job", "gpu": 2},
-                 {"workload_type": "KServe", "gpu": 1}]},
+                 {"workload_type": "Job", "gpu": 2, "namespace": "team-ml",
+                  "ready": False},
+                 {"workload_type": "KServe", "gpu": 1, "namespace": "kserve",
+                  "ready": True}]},
             {"name": "n3", "product": "B200", "capacity": 8, "allocatable": 8,
              "allocated": 1, "free": 7, "allocations": [
-                 {"workload_type": "Notebook", "gpu": 1}]},
+                 {"workload_type": "Notebook", "gpu": 1, "namespace": "research",
+                  "ready": True}]},
         ]}
 
     def test_totals(self):
@@ -209,18 +215,152 @@ class TestSummarize(unittest.TestCase):
         s = summarize(snap)
         self.assertEqual(s["gpu_free"], 5)
 
+    def test_by_namespace(self):
+        s = summarize(self._snap())
+        self.assertEqual(s["by_namespace"],
+                         {"kserve": 9, "team-ml": 2, "research": 1})
+
+    def test_by_ready(self):
+        s = summarize(self._snap())
+        self.assertEqual(s["by_ready"], {"true": 10, "false": 2})
+
+    def test_by_namespace_and_ready_missing_keys(self):
+        # namespace 없음 -> "기타", ready 없음 -> false 버킷
+        snap = {"nodes": [{"name": "n", "capacity": 8, "allocated": 2,
+                           "allocations": [{"workload_type": "Job", "gpu": 2}]}]}
+        s = summarize(snap)
+        self.assertEqual(s["by_namespace"], {"기타": 2})
+        self.assertEqual(s["by_ready"], {"true": 0, "false": 2})
+
+    def test_by_ready_zero_filled_without_allocations(self):
+        s = summarize({"nodes": []})
+        self.assertEqual(s["by_ready"], {"true": 0, "false": 0})
+        self.assertEqual(s["by_namespace"], {})
+
 
 class TestPrometheus(unittest.TestCase):
+    def _snap(self):
+        return {
+            "summary": {"gpu_capacity": 16, "gpu_allocated": 9, "gpu_free": 7,
+                        "node_count": 2,
+                        "by_workload_type": {"KServe": 9},
+                        "by_namespace": {"kserve": 9},
+                        "by_ready": {"true": 9, "false": 0}},
+            "nodes": [
+                {"name": "n1", "product": "H100",
+                 "product_raw": "NVIDIA-H100-80GB-HBM3", "ready": True,
+                 "capacity": 8, "allocatable": 8, "allocated": 8, "free": 0,
+                 "error": None},
+                # 수집 실패 노드: error + free=None (allocated 과소집계 상태)
+                {"name": "n2", "product": "H100",
+                 "product_raw": "NVIDIA-H100-80GB-HBM3", "ready": False,
+                 "capacity": 8, "allocatable": 8, "allocated": 1, "free": None,
+                 "error": "pods: HTTP 403"},
+            ],
+            "k8s_enabled": True,
+            "errors": ["nodes: 부분 실패"],
+        }
+
     def test_render(self):
-        snap = {"summary": {"gpu_capacity": 16, "gpu_allocated": 9, "gpu_free": 7,
-                            "by_workload_type": {"KServe": 9}},
-                "nodes": [{"name": "n1", "product": "H100", "capacity": 8,
-                           "allocated": 8, "free": 0}]}
-        text = render_prometheus_metrics(snap)
+        text = render_prometheus_metrics(self._snap())
         self.assertIn("gpu_monitor_build_info{version=", text)
         self.assertIn("gpu_monitor_cluster_gpu_allocated 9", text)
         self.assertIn('gpu_monitor_node_gpu{node="n1",product="H100",state="allocated"} 8', text)
         self.assertIn('gpu_monitor_gpu_allocated_by_type{type="KServe"} 9', text)
+
+    def test_render_new_families(self):
+        text = render_prometheus_metrics(self._snap())
+        self.assertIn("gpu_monitor_nodes 2", text)
+        self.assertIn('gpu_monitor_node_gpu{node="n1",product="H100",state="allocatable"} 8',
+                      text)
+        self.assertIn('gpu_monitor_node_ready{node="n1"} 1', text)
+        self.assertIn('gpu_monitor_node_ready{node="n2"} 0', text)
+        self.assertIn('gpu_monitor_node_info{node="n1",product="H100",'
+                      'product_raw="NVIDIA-H100-80GB-HBM3"} 1', text)
+        self.assertIn('gpu_monitor_node_collect_error{node="n1",product="H100"} 0', text)
+        self.assertIn('gpu_monitor_node_collect_error{node="n2",product="H100"} 1', text)
+        self.assertIn('gpu_monitor_gpu_allocated_by_namespace{namespace="kserve"} 9', text)
+        self.assertIn('gpu_monitor_gpu_allocated_by_ready{ready="true"} 9', text)
+        self.assertIn('gpu_monitor_gpu_allocated_by_ready{ready="false"} 0', text)
+        self.assertIn("gpu_monitor_collect_errors 1", text)
+        self.assertIn("gpu_monitor_k8s_enabled 1", text)
+        self.assertIn("gpu_monitor_demo 0", text)
+
+    def test_render_error_node_free_none_skipped(self):
+        # 수집 실패 노드(free=None)는 state="free" 라인이 없어야 한다(0 으로 오인 금지).
+        text = render_prometheus_metrics(self._snap())
+        self.assertNotIn('gpu_monitor_node_gpu{node="n2",product="H100",state="free"}', text)
+        self.assertIn('gpu_monitor_node_gpu{node="n2",product="H100",state="capacity"} 8',
+                      text)
+
+    def test_render_metric_families_grouped(self):
+        # text format 0.0.4: 같은 계열의 샘플은 한 그룹으로 이어져야 한다.
+        text = render_prometheus_metrics(self._snap())
+        groups, seen = [], set()
+        for line in text.splitlines():
+            if not line or line.startswith("#"):
+                continue
+            name = line.split("{")[0].split(" ")[0]
+            if not groups or groups[-1] != name:
+                self.assertNotIn(name, seen, "계열 %s 가 두 그룹으로 갈라짐" % name)
+                seen.add(name)
+                groups.append(name)
+
+
+class TestObservability(unittest.TestCase):
+    def test_render_without_meta_omits_observability(self):
+        # 1-인자 호출(하위호환) — 관측성 계열은 전부 부재해야 한다(0 방출 금지).
+        text = render_prometheus_metrics({"summary": {}, "nodes": []})
+        self.assertNotIn("gpu_monitor_up", text)
+        self.assertNotIn("gpu_monitor_last_success_timestamp_seconds", text)
+        self.assertNotIn("gpu_monitor_refreshes_total", text)
+        self.assertNotIn("gpu_monitor_refresh_failures_total", text)
+
+    def test_render_with_meta(self):
+        meta = {"up": True, "last_success_epoch": 1751852000.5,
+                "refreshes": 7, "failures": 2}
+        text = render_prometheus_metrics({"summary": {}, "nodes": []}, meta)
+        self.assertIn("gpu_monitor_up 1", text)
+        self.assertIn("gpu_monitor_last_success_timestamp_seconds 1751852000.500", text)
+        self.assertIn("# TYPE gpu_monitor_refreshes_total counter", text)
+        self.assertIn("gpu_monitor_refreshes_total 7", text)
+        self.assertIn("# TYPE gpu_monitor_refresh_failures_total counter", text)
+        self.assertIn("gpu_monitor_refresh_failures_total 2", text)
+
+    def test_render_meta_without_success_omits_timestamp(self):
+        # 성공 이력 없음 -> timestamp 라인 생략(0 방출 시 staleness 즉시 오발화).
+        meta = {"up": False, "last_success_epoch": None, "refreshes": 0, "failures": 0}
+        text = render_prometheus_metrics({"summary": {}, "nodes": []}, meta)
+        self.assertIn("gpu_monitor_up 0", text)
+        self.assertNotIn("gpu_monitor_last_success_timestamp_seconds", text)
+        self.assertIn("gpu_monitor_refreshes_total 0", text)
+
+    def test_build_meta_empty_store(self):
+        store = SnapshotStore()
+        meta = build_meta(store, Refresher({}, store, 15))
+        self.assertEqual(meta, {"up": False, "last_success_epoch": None,
+                                "refreshes": 0, "failures": 0})
+
+    def test_build_meta_after_set(self):
+        store = SnapshotStore()
+        store.set({"nodes": []})
+        self.assertTrue(build_meta(store, Refresher({}, store, 15))["up"])
+
+    def test_refresh_once_success_updates_meta(self):
+        store = SnapshotStore()
+        r = Refresher({"demo": True}, store, 15)
+        asyncio.run(r._refresh_once())
+        self.assertEqual((r.refreshes, r.failures), (1, 0))
+        self.assertIsNotNone(store.last_success_epoch)
+        self.assertTrue(store.get().get("demo"))
+
+    def test_refresh_once_failure_counts_and_keeps_last_success(self):
+        store = SnapshotStore()
+        r = Refresher(None, store, 15)   # settings=None -> build_snapshot 예외
+        asyncio.run(r._refresh_once())
+        self.assertEqual((r.refreshes, r.failures), (1, 1))
+        self.assertIsNone(store.last_success_epoch)   # 실패 사이클은 갱신 금지
+        self.assertIsNone(store.get())
 
 
 if __name__ == "__main__":

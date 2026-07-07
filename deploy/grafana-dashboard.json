@@ -1,0 +1,1672 @@
+{
+  "__requires": [
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    }
+  ],
+  "title": "GPU Monitor — 노드별 GPU 할당",
+  "uid": "gpu-monitor-alloc",
+  "description": "노드별 GPU 할당(allocation) 현황 — 사용률(DCGM) 아님. gpu-monitor /metrics 기반.",
+  "tags": [
+    "gpu-monitor",
+    "gpu",
+    "allocation"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "annotations": {
+    "list": [
+      {
+        "name": "알럿",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "enable": true,
+        "iconColor": "red",
+        "expr": "ALERTS{alertname=~\".*Gpu.*\", alertstate=\"firing\"}",
+        "titleFormat": "{{alertname}}"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "데이터소스",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "node",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "label": "노드",
+        "query": {
+          "query": "label_values(gpu_monitor_node_gpu, node)",
+          "refId": "v_node"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {},
+        "sort": 1
+      },
+      {
+        "name": "product",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "label": "제품",
+        "query": {
+          "query": "label_values(gpu_monitor_node_gpu, product)",
+          "refId": "v_product"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {},
+        "sort": 1
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "label": "네임스페이스",
+        "query": {
+          "query": "label_values(gpu_monitor_gpu_allocated_by_namespace, namespace)",
+          "refId": "v_namespace"
+        },
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": {},
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "클러스터 개요",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "text",
+      "title": "",
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 24,
+        "h": 2
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**할당(allocation) 현황 — 사용률(DCGM) 아님.** 모든 수치는 Pod 이 점유한 `nvidia.com/gpu` 슬롯 수다. GPU 가 실제 몇 % 바쁜지(사용률·VRAM·온도)는 dcgm-exporter 대시보드 영역. **할당률 = allocated / capacity** — 높을수록 스케줄 headroom 소진(위험, 임계 70/90). 분모는 기존 알럿과 같은 capacity 기준이라 allocatable 과 다를 수 있다."
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "총 GPU 용량",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 3,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_cluster_gpu_capacity",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "할당된 GPU",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 3,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_cluster_gpu_allocated",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "유휴 GPU",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 3,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_cluster_gpu_free",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "0 이면 신규 GPU 워크로드가 Pending 으로 쌓인다."
+    },
+    {
+      "id": 6,
+      "type": "gauge",
+      "title": "클러스터 할당률",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 3,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * gpu_monitor_cluster_gpu_allocated / clamp_min(gpu_monitor_cluster_gpu_capacity, 1)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "할당률(사용률 아님). 분모 = capacity."
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "GPU 노드 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 3,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_nodes",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "급락하면 스케일 인 또는 labelSelector 미스매치."
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "모니터 버전",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 3,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max by(version)(gpu_monitor_build_info)",
+          "refId": "A",
+          "legendFormat": "{{version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "textMode": "name",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "할당 · 유휴 · 용량 추이",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 7,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_cluster_gpu_capacity",
+          "refId": "A",
+          "legendFormat": "용량"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_cluster_gpu_allocated",
+          "refId": "B",
+          "legendFormat": "할당"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_cluster_gpu_free",
+          "refId": "C",
+          "legendFormat": "유휴"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "table",
+          "calcs": [
+            "lastNotNull"
+          ],
+          "placement": "right"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "장치(제품)별",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 15,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "제품별 GPU 용량 분포",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"capacity\",product=~\"$product\",node=~\"$node\"})",
+          "refId": "A",
+          "legendFormat": "{{product}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "bargauge",
+      "title": "제품별 할당 / 유휴",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"allocated\",product=~\"$product\",node=~\"$node\"})",
+          "refId": "A",
+          "legendFormat": "{{product}} 할당"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by(product)(gpu_monitor_node_gpu{state=\"free\",product=~\"$product\",node=~\"$node\"})",
+          "refId": "B",
+          "legendFormat": "{{product}} 유휴"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 13,
+      "type": "bargauge",
+      "title": "제품별 할당률",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 16,
+        "w": 8,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * sum by(product)(gpu_monitor_node_gpu{state=\"allocated\",product=~\"$product\",node=~\"$node\"}) / clamp_min(sum by(product)(gpu_monitor_node_gpu{state=\"capacity\",product=~\"$product\",node=~\"$node\"}), 1)",
+          "refId": "A",
+          "legendFormat": "{{product}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 14,
+      "type": "row",
+      "title": "워크로드 타입 / 네임스페이스별",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 15,
+      "type": "piechart",
+      "title": "타입별 할당 분포",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_gpu_allocated_by_type",
+          "refId": "A",
+          "legendFormat": "{{type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "pieType": "donut",
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value"
+          ]
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "bargauge",
+      "title": "타입별 할당 순위",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 25,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sort_desc(gpu_monitor_gpu_allocated_by_type)",
+          "refId": "A",
+          "legendFormat": "{{type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 17,
+      "type": "bargauge",
+      "title": "네임스페이스별 할당",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 25,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sort_desc(gpu_monitor_gpu_allocated_by_namespace{namespace=~\"$namespace\"})",
+          "refId": "A",
+          "legendFormat": "{{namespace}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Not-Ready Pod 점유 GPU",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 25,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_gpu_allocated_by_ready{ready=\"false\"}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "점유만 하고 아직 안 뜬 GPU (Pending/기동 중/좀비 점유). 기동 중 not-ready 는 정상이므로 지속될 때만 볼 것."
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "타입별 할당 추이",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 29,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_gpu_allocated_by_type",
+          "refId": "A",
+          "legendFormat": "{{type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            },
+            "fillOpacity": 30
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "노드별",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 33,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "노드별 할당 현황",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 12,
+        "h": 9
+      },
+      "description": "state 라벨을 컬럼으로 피벗(Labels to fields). 수집 실패 노드는 free 가 비어 보인다 — '수집 헬스' row 의 노드 수집 실패와 함께 볼 것.",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_node_gpu{node=~\"$node\",product=~\"$product\"}",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "state"
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "node": 0,
+              "product": 1,
+              "capacity": 2,
+              "allocatable": 3,
+              "allocated": 4,
+              "free": 5
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "sortBy": [
+          {
+            "displayName": "free"
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "type": "bargauge",
+      "title": "노드별 할당률",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 34,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * gpu_monitor_node_gpu{state=\"allocated\",node=~\"$node\",product=~\"$product\"} / ignoring(state) clamp_min(gpu_monitor_node_gpu{state=\"capacity\",node=~\"$node\",product=~\"$product\"}, 1)",
+          "refId": "A",
+          "legendFormat": "{{node}} ({{product}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 23,
+      "type": "bargauge",
+      "title": "노드별 유휴 GPU",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_node_gpu{state=\"free\",node=~\"$node\",product=~\"$product\"}",
+          "refId": "A",
+          "legendFormat": "{{node}} ({{product}})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal"
+      }
+    },
+    {
+      "id": 24,
+      "type": "state-timeline",
+      "title": "노드 할당률 타임라인",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 43,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "100 * gpu_monitor_node_gpu{state=\"allocated\",node=~\"$node\",product=~\"$product\"} / ignoring(state) clamp_min(gpu_monitor_node_gpu{state=\"capacity\",node=~\"$node\",product=~\"$product\"}, 1)",
+          "refId": "A",
+          "legendFormat": "{{node}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent",
+          "custom": {
+            "fillOpacity": 70
+          },
+          "color": {
+            "mode": "thresholds"
+          },
+          "min": 0,
+          "max": 100
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "tooltip": {
+          "mode": "single"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "row",
+      "title": "상태 · 수집 헬스",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 51,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "만석(Full) 노드 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(gpu_monitor_node_gpu{state=\"free\"} == 0) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "유휴 0 노드. 수집 실패 노드는 free 시리즈가 없어 여기 안 잡힌다 — '노드 수집 실패' stat 과 함께 볼 것."
+    },
+    {
+      "id": 27,
+      "type": "stat",
+      "title": "NotReady GPU 노드 수",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 52,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(gpu_monitor_node_ready == 0) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "NotReady 손실 용량",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 52,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(gpu_monitor_node_gpu{state=\"capacity\"} and on(node) (gpu_monitor_node_ready == 0)) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "NotReady 노드에 묶인 GPU — free 로 보여도 스케줄 불가."
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "NotReady 노드 위 할당",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 52,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(gpu_monitor_node_gpu{state=\"allocated\"} and on(node) (gpu_monitor_node_ready == 0)) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "booked-but-unschedulable — GpuAllocationOnNotReadyNode 알럿과 동일 신호."
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "수집 상태",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 52,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_up",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "OK",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "마지막 성공 수집 경과",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 20,
+        "y": 52,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "time() - gpu_monitor_last_success_timestamp_seconds",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 75
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "75s(스크레이프 2주기) 초과 지속 시 GpuMonitorStale."
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "수집 오류 (스냅샷)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_collect_errors",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "노드 목록 수집 실패(RBAC/도달성). readyz 는 이때도 200 이다."
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "노드 수집 실패",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 4,
+        "y": 56,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(gpu_monitor_node_collect_error == 1) or vector(0)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "해당 노드는 allocated=0 으로 과소집계 중."
+    },
+    {
+      "id": 34,
+      "type": "stat",
+      "title": "k8s 클라이언트",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 56,
+        "w": 4,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "gpu_monitor_k8s_enabled",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "비활성",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "활성",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "0 = SA 토큰 없음/클러스터 밖(또는 demo)."
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "refresh 시도 / 실패 (5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 56,
+        "w": 12,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "increase(gpu_monitor_refreshes_total[5m])",
+          "refId": "A",
+          "legendFormat": "시도"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "increase(gpu_monitor_refresh_failures_total[5m])",
+          "refId": "B",
+          "legendFormat": "실패(예상외 예외)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "시도=heartbeat(0 이면 루프 정지). 카운터는 재시작 시 리셋 — 절대값 패널 금지."
+    }
+  ]
+}
