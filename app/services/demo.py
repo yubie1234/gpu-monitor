@@ -8,13 +8,26 @@ from app.services.snapshot import summarize
 
 def demo_snapshot():
     nodes = [
+        # 물리 8장 중 1장을 타임슬라이스(replicas=8 -> .10gb 8슬롯), 7장은 온전.
         {"name": "gpu-node-01", "ready": True, "product": "H100",
-         "product_raw": "NVIDIA-H100-80GB-HBM3", "capacity": 8, "allocatable": 8,
-         "allocated": 8, "free": 0, "error": None,
+         "product_raw": "NVIDIA-H100-80GB-HBM3", "capacity": 7, "allocatable": 7,
+         "allocated": 7, "free": 0, "error": None,
+         "physical": 8, "replicas": 8, "sharing_strategy": "time-slicing",
+         "shared_backing": 1,
+         "shared_pools": [
+             {"resource": "nvidia.com/gpu.10gb", "profile": "10gb",
+              "capacity": 8, "allocatable": 8, "allocated": 3, "free": 5,
+              "allocations": [
+                  {"namespace": "team-ml", "pod": "jhwang-notebook-0",
+                   "workload": "jhwang", "workload_type": "Notebook",
+                   "slots": 2, "ready": True},
+                  {"namespace": "team-ml", "pod": "eval-batch-x2k9",
+                   "workload": "eval-batch", "workload_type": "Job",
+                   "slots": 1, "ready": False}]}],
          "allocations": [
              {"namespace": "kserve", "pod": "qwen3-72b-instruct-predictor-0",
               "workload": "qwen3-72b-instruct", "workload_type": "KServe",
-              "gpu": 8, "ready": True}]},
+              "gpu": 7, "ready": True}]},
         {"name": "gpu-node-02", "ready": True, "product": "H100",
          "product_raw": "NVIDIA-H100-80GB-HBM3", "capacity": 8, "allocatable": 8,
          "allocated": 3, "free": 5, "error": None,

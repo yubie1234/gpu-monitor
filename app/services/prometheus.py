@@ -29,6 +29,21 @@ def render_prometheus_metrics(snap, meta=None):
         out.append("# TYPE gpu_monitor_cluster_gpu_%s gauge" % metric)
         out.append("gpu_monitor_cluster_gpu_%s %d" % (metric, int(s.get(key) or 0)))
 
+    # 물리 GPU 총수(gpu.count 합) — 온전+공유로 빠진 장수 모두 포함.
+    out.append("# HELP gpu_monitor_cluster_gpu_physical"
+               " Cluster physical GPU count (nvidia.com/gpu.count sum).")
+    out.append("# TYPE gpu_monitor_cluster_gpu_physical gauge")
+    out.append("gpu_monitor_cluster_gpu_physical %d" % int(s.get("gpu_physical") or 0))
+
+    # 공유(타임슬라이스/MPS) 슬롯 — 온전 GPU 와 단위가 다르다(1 슬롯 ≠ 1 물리장).
+    shared = s.get("shared") or {}
+    out.append("# HELP gpu_monitor_cluster_shared_slots"
+               " Cluster shared (time-sliced/MPS) slots by state — NOT physical GPUs.")
+    out.append("# TYPE gpu_monitor_cluster_shared_slots gauge")
+    for state in ("capacity", "allocated", "free"):
+        out.append('gpu_monitor_cluster_shared_slots{state="%s"} %d'
+                   % (state, int(shared.get(state) or 0)))
+
     out.append("# HELP gpu_monitor_nodes GPU node count.")
     out.append("# TYPE gpu_monitor_nodes gauge")
     out.append("gpu_monitor_nodes %d" % int(s.get("node_count") or 0))
@@ -69,6 +84,42 @@ def render_prometheus_metrics(snap, meta=None):
         out.append('gpu_monitor_node_collect_error{node="%s",product="%s"} %d'
                    % (_esc(n.get("name")), _esc(n.get("product") or "GPU"),
                       1 if n.get("error") else 0))
+
+    out.append("# HELP gpu_monitor_node_physical"
+               " Physical GPU count per node (nvidia.com/gpu.count).")
+    out.append("# TYPE gpu_monitor_node_physical gauge")
+    for n in nodes:
+        phys = n.get("physical")
+        if phys is None:
+            continue
+        out.append('gpu_monitor_node_physical{node="%s",product="%s"} %d'
+                   % (_esc(n.get("name")), _esc(n.get("product") or "GPU"), int(phys)))
+
+    out.append("# HELP gpu_monitor_node_shared_backing"
+               " Physical GPUs on the node carved into shared pools (physical - whole).")
+    out.append("# TYPE gpu_monitor_node_shared_backing gauge")
+    for n in nodes:
+        b = n.get("shared_backing")
+        if b is None:
+            continue
+        out.append('gpu_monitor_node_shared_backing{node="%s",product="%s"} %d'
+                   % (_esc(n.get("name")), _esc(n.get("product") or "GPU"), int(b)))
+
+    out.append("# HELP gpu_monitor_node_shared"
+               " Per-node shared-pool slots by resource and state (NOT physical GPUs).")
+    out.append("# TYPE gpu_monitor_node_shared gauge")
+    for n in nodes:
+        node = _esc(n.get("name"))
+        prod = _esc(n.get("product") or "GPU")
+        for pool in n.get("shared_pools") or []:
+            res = _esc(pool.get("resource"))
+            for state in ("capacity", "allocatable", "allocated", "free"):
+                val = pool.get(state)
+                if val is None:
+                    continue
+                out.append('gpu_monitor_node_shared{node="%s",product="%s",'
+                           'resource="%s",state="%s"} %d'
+                           % (node, prod, res, state, int(val)))
 
     out.append("# HELP gpu_monitor_gpu_allocated_by_type Allocated GPU by workload type.")
     out.append("# TYPE gpu_monitor_gpu_allocated_by_type gauge")

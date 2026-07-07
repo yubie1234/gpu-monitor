@@ -1,4 +1,4 @@
-# gpu-monitor `v0.1.1`
+# gpu-monitor `v0.1.2`
 
 노드별 **GPU 할당(allocation) 현황** 대시보드. 클러스터의 각 노드가 어떤 GPU를 몇 개
 가졌고(capacity), 그중 몇 개가 어떤 워크로드에 **할당**됐는지(allocated), 몇 개가
@@ -15,6 +15,9 @@
 - **노드별**: GPU 장치명(H100/B200…) · 할당/총량 · 유휴
 - **노드 내 할당 목록**: 각 GPU 점유 Pod 을 **워크로드 타입**과 함께
   (KServe · Job · Notebook · Deployment · StatefulSet · …, Pod 라벨/owner 로 추정)
+- **공유(타임슬라이스/MPS) 풀**: 물리 GPU 1장을 여러 슬롯으로 쪼갠 `nvidia.com/gpu.<프로파일>`
+  (예: `nvidia.com/gpu.10gb`)을 **슬롯 단위로 별도** 표시. "물리 8장 중 1장이 슬라이스"까지 재구성
+  (아래 [공유 GPU](#공유-타임슬라이스mps-gpu) 참고)
 - **클러스터 집계**: 총/할당/유휴 GPU, 장치별·워크로드 타입별 분포
 - Prometheus `/metrics`
 
@@ -46,9 +49,14 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 | 계열 | 타입 | 라벨 | 의미 |
 |---|---|---|---|
 | `gpu_monitor_build_info` | gauge (상수 1) | `version` | 빌드 정보 |
-| `gpu_monitor_cluster_gpu_capacity` / `_allocated` / `_free` | gauge | – | 클러스터 총/할당/유휴 GPU |
+| `gpu_monitor_cluster_gpu_capacity` / `_allocated` / `_free` | gauge | – | 클러스터 **온전(whole)** GPU 총/할당/유휴 (`nvidia.com/gpu`) |
+| `gpu_monitor_cluster_gpu_physical` | gauge | – | 클러스터 **물리** GPU 총수 (`nvidia.com/gpu.count` 합) — 공유로 빠진 장수 포함 |
+| `gpu_monitor_cluster_shared_slots` | gauge | `state` (capacity/allocated/free) | 클러스터 **공유 슬롯** — 타임슬라이스/MPS. **물리 장수 아님**(1 슬롯 ≠ 1장) |
 | `gpu_monitor_nodes` | gauge | – | GPU 노드 수 |
-| `gpu_monitor_node_gpu` | gauge | `node`, `product`, `state` | 노드별 GPU — state=capacity/allocatable/allocated/free (값 `None` 이면 라인 생략) |
+| `gpu_monitor_node_gpu` | gauge | `node`, `product`, `state` | 노드별 온전 GPU — state=capacity/allocatable/allocated/free (값 `None` 이면 라인 생략) |
+| `gpu_monitor_node_physical` | gauge | `node`, `product` | 노드 물리 GPU 장수 (`nvidia.com/gpu.count`; 라벨 없으면 라인 생략) |
+| `gpu_monitor_node_shared_backing` | gauge | `node`, `product` | 그 노드에서 공유 풀로 빠진 물리 장수 (= physical − whole) |
+| `gpu_monitor_node_shared` | gauge | `node`, `product`, `resource`, `state` | 노드 공유 풀 슬롯 — resource=`nvidia.com/gpu.10gb` 등, state=capacity/allocatable/allocated/free |
 | `gpu_monitor_node_ready` | gauge (0/1) | `node` | 노드 Ready — free>0 이어도 0 이면 스케줄 불가 |
 | `gpu_monitor_node_info` | gauge (상수 1) | `node`, `product`, `product_raw` | 축약 제품명 ↔ GFD 원문 라벨 매핑 |
 | `gpu_monitor_node_collect_error` | gauge (0/1) | `node`, `product` | 노드 Pod 조회 실패 — 1 이면 그 노드 allocation 이 과소집계 중 |
@@ -67,6 +75,30 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
   (RBAC, 노드 조회 실패)는 예외 없이 흡수되므로 `collect_errors`/`node_collect_error` 로 잡는다.
 - 네임스페이스·노드·GPU 제품명이 라벨로 노출된다 — `/metrics` 는 무인증이므로 외부 노출 시 주의.
   워크로드·Pod 명은 라벨엔 없지만 무인증 `/api/snapshot` 에 노출된다(배포 절 참고).
+
+## 공유 (타임슬라이스/MPS) GPU
+
+한 노드가 물리 GPU 일부를 타임슬라이스/MPS 로 쪼개 쓰면, K8s 는 온전 GPU 와 **다른
+리소스명**으로 슬롯을 광고한다 — 예: `nvidia.com/gpu.10gb`(H100 80GB 를 replicas=8 로 쪼갠
+10GB 슬롯 8개). 슬롯은 물리 장수와 **단위가 다르다**(1 슬롯 ≠ 1장). 그래서 합치지 않고
+**따로** 집계한다.
+
+```
+Capacity:  nvidia.com/gpu: 7   nvidia.com/gpu.10gb: 8
+Labels:    nvidia.com/gpu.count: 8   nvidia.com/gpu.replicas: 8
+           nvidia.com/gpu.sharing-strategy: time-slicing
+        →  물리 8 − 온전 7 = 1장이 타임슬라이스로 빠짐 → .10gb 8슬롯 (= 1장 × replicas 8)
+```
+
+- **물리 장수**는 노드 라벨 `nvidia.com/gpu.count`. **공유로 빠진 장수** = `count − nvidia.com/gpu`
+  (추정 아님, 산수). 라벨이 없으면 물리 = 온전 capacity 로 폴백한다.
+- 온전 GPU 집계(`gpu_capacity`/`by_workload_type`/…)는 **그대로**라 기존 Grafana·알럿은 안 바뀐다.
+  공유는 `*_physical` / `*_shared*` / `cluster_shared_slots` **신규 계열**로만 노출.
+- 대시보드: 노드 헤더에 `물리 8 · 온전 7 · 슬라이스 1장`, 그 아래 공유 풀 섹션이 슬롯 할당을
+  프로파일(`10gb`)별로 보여준다. JSON 은 노드의 `physical`/`shared_backing`/`shared_pools`,
+  summary 의 `gpu_physical`/`shared`.
+- **MIG 아님**: 타임슬라이스는 메모리를 하드 분할하지 않는다(슬롯끼리 전체 VRAM 공유). `.10gb`
+  는 device-plugin 설정상 붙인 **이름**일 뿐 강제 한도가 아니다 — 실사용률은 여전히 DCGM 영역.
 
 ## 필요한 RBAC
 
