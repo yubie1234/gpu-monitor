@@ -42,9 +42,12 @@ def build_snapshot(settings):
 
 
 def summarize(snap):
-    """클러스터/장치/워크로드 타입별 GPU 집계."""
+    """클러스터/장치/워크로드 타입/네임스페이스/ready 별 GPU 집계."""
     s = {"node_count": 0, "gpu_capacity": 0, "gpu_allocated": 0, "gpu_free": 0,
-         "products": {}, "by_workload_type": {}}
+         "products": {}, "by_workload_type": {}, "by_namespace": {},
+         # ready 버킷은 항상 양쪽을 채운다(0 이어도) — 메트릭 absent 방지.
+         # 키는 소문자 문자열: JSON API 와 Prometheus 라벨이 같은 표현을 쓴다.
+         "by_ready": {"true": 0, "false": 0}}
     nodes = snap.get("nodes") or []
     s["node_count"] = len(nodes)
     for n in nodes:
@@ -62,6 +65,10 @@ def summarize(snap):
         p["allocated"] += alloc
         p["free"] += free
         for a in n.get("allocations") or []:
+            gpu = a.get("gpu") or 0
             t = a.get("workload_type") or "기타"
-            s["by_workload_type"][t] = s["by_workload_type"].get(t, 0) + (a.get("gpu") or 0)
+            s["by_workload_type"][t] = s["by_workload_type"].get(t, 0) + gpu
+            ns = a.get("namespace") or "기타"
+            s["by_namespace"][ns] = s["by_namespace"].get(ns, 0) + gpu
+            s["by_ready"]["true" if a.get("ready") else "false"] += gpu
     return s

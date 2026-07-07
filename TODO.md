@@ -27,33 +27,8 @@
 
 스냅샷 dict 에 **이미 존재하는 필드**만 노출한다(수집기 K8s 호출 추가 없음). `render` 확장 ± `summarize` 집계 몇 줄이면 된다.
 
-### P1 — 데이터 이미 있음, 변경 최소, 가치 높음
-
-- **`gpu_monitor_node_gpu{state="allocatable"}`** — gauge · 라벨 `node, product, state`
-  - 근거: `node["allocatable"]` (gpu.py:56, collect.py:32). prometheus.py:31 의 state 튜플에 `"allocatable"` 한 개 추가.
-  - 이유: `free = allocatable − allocated`(collect.py:70-71) 의 분모를 노출해야 `capacity ≠ allocatable`(디바이스 플러그인 미기동/예약) 판별·free 검증이 된다. `None` 가드는 그대로 둔다.
-
-- **`gpu_monitor_node_ready`** — gauge (0/1) · 라벨 `node`
-  - 근거: `node["ready"]` = `node_ready()` (gpu.py:64-68, collect.py:29, demo.py:11). prometheus.py:28 노드 루프에 한 줄.
-  - 이유: NotReady 노드의 capacity 는 스케줄 불가 → `free` 로 잡혀도 실제로 못 쓴다. `gpu_monitor_node_gpu{state="free"}>0 and gpu_monitor_node_ready==0` 로 "빈 GPU 인데 죽은 노드" 를 구분. **가장 가치 높은 신규 헬스 메트릭.**
-
-- **`gpu_monitor_gpu_allocated_by_namespace`** — gauge · 라벨 `namespace` (값 = 해당 ns 할당 GPU 합)
-  - 근거: `allocation.namespace` (collect.py:61). `summarize`(snapshot.py:44-67)에 `by_namespace` 집계 추가.
-  - 이유: 팀/네임스페이스별 점유(간이 chargeback)는 할당 대시보드의 핵심 질문인데 현재 축이 없다. namespace 는 pod 명과 달리 카디널리티가 안정적이라 장기 보존 안전.
-
-### P2 — 소규모 집계/루프 추가
-
-- **`gpu_monitor_gpu_allocated_by_ready`** — gauge · 라벨 `ready` (0/1 로 분해한 할당 GPU 합)
-  - 근거: `allocation.ready` = `pod_ready()` (gpu.py:31-39, collect.py:67). `summarize` 에 ready 축 추가.
-  - 이유: `ready="false"` = 점유만 하고 아직 안 뜬 GPU(Pending/기동 중/좀비 점유). 여전히 할당 경계 내(phase/condition, 사용률 아님). 기동 중 not-ready 는 정상이라 알럿은 `for:` 지연 필요.
-
-- **`gpu_monitor_nodes`** — gauge · 라벨 (없음)
-  - 근거: `summary.node_count` (snapshot.py:49). `count(gpu_monitor_node_gpu{state="capacity"})` 로 파생 가능하나 pre-aggregated 값을 저렴하게 노출.
-  - 이유: GPU 노드 급락(스케일 인/라벨셀렉터 미스매치로 0개) 직접 감시.
-
-- **`gpu_monitor_node_info`** — gauge (상수 1) · 라벨 `node, product, product_raw`
-  - 근거: `node["product_raw"]`(예 `NVIDIA-H100-80GB-HBM3`, collect.py:30, gpu.py:58-61). `build_info` 식 info-metric.
-  - 이유: short `H100` ↔ GFD 원문 라벨 매핑을 노출해 다른 메트릭과 `node` 조인 시 세대/모델 필터링.
+> **P1/P2 완료(feature/metrics-observability):** `state="allocatable"`, `node_ready`,
+> `by_namespace`, `by_ready`, `nodes`, `node_info` 는 구현돼 아래에서 제거됨.
 
 ### P3 — 카디널리티/파생 트레이드오프 있음(선택)
 
@@ -181,18 +156,12 @@ interval 기본 15s(config.py:28, state.py:27) 기준. `GpuMonitorDown`·`Cluste
 우선순위: **[P1]** 데이터 있음·변경 최소·가치 높음 → **[P2]** 소규모 집계 → **[P3]** 카디널리티/파생 트레이드오프.
 
 ### 코드 — 할당 메트릭
-- [ ] **[P1]** `prometheus.py` node 루프 state 튜플에 `"allocatable"` 추가 → `gpu_monitor_node_gpu{state="allocatable"}` (`None` 가드 유지)
-- [ ] **[P1]** `prometheus.py` node 루프에서 `gpu_monitor_node_ready{node}` (0/1) 방출
-- [ ] **[P1]** `summarize` 에 `by_namespace` 집계 추가 + `prometheus.py` `gpu_monitor_gpu_allocated_by_namespace{namespace}` 방출
-- [ ] **[P2]** `summarize` 에 `by_ready` 집계 추가 + `gpu_monitor_gpu_allocated_by_ready{ready}` 방출
-- [ ] **[P2]** `gpu_monitor_nodes` (summary.node_count) + `gpu_monitor_node_info{node,product,product_raw}` 방출
-- [ ] **[P3]** `gpu_monitor_workload_gpu{node,namespace,workload,workload_type}` — **pod 명 라벨 제외**(카디널리티)
+- [ ] **[P3]** `gpu_monitor_workload_gpu{node,namespace,workload,workload_type}` — **pod 명 라벨 제외**(카디널리티). **주의:** 같은 워크로드 레플리카 여러 개가 한 노드에 있으면 동일 라벨셋 중복 방출로 exposition 이 깨진다 — 방출 전 키별 **사전 합산 필수**
 - [ ] **[P3]** (선택) `gpu_monitor_product_gpu{product,state}` — 파생 가능하므로 recording rule 우선 검토
 
 ### 코드 — 관측성 메트릭 (model-monitor 이식)
-- [ ] **[P1]** `render_prometheus_metrics(snap, meta=None)` 로 시그니처 확장 (routes.py:43·test:219 하위호환 위해 `meta` optional 필수)
-- [ ] **[P1]** `prometheus.py` snap-only 방출: `gpu_monitor_collect_errors`, `gpu_monitor_node_collect_error{node,product}`, `gpu_monitor_k8s_enabled`
-- [ ] **[P1]** `/metrics` 핸들러(routes.py:38-44)에서 `meta` 구성 + `gpu_monitor_up` 방출
+- [ ] **[P1]** `render_prometheus_metrics(snap, meta=None)` 로 시그니처 확장 (routes.py·test 하위호환 위해 `meta` optional 필수)
+- [ ] **[P1]** `/metrics` 핸들러에서 `meta` 구성 + `gpu_monitor_up` 방출
 - [ ] **[P2]** `state.py`: `import time`, `SnapshotStore.last_success_epoch`(성공 분기만 갱신) → `gpu_monitor_last_success_timestamp_seconds`
 - [ ] **[P3]** `state.py`: `Refresher.refreshes`/`failures` 카운터 → `gpu_monitor_refreshes_total`/`gpu_monitor_refresh_failures_total` (counter)
 
@@ -201,9 +170,7 @@ interval 기본 15s(config.py:28, state.py:27) 기준. `GpuMonitorDown`·`Cluste
 - [ ] **[P2]** `deploy/prometheus-alerts.yaml` 확장 — 위 알럿 세트 추가(기존 3종은 신규 메트릭으로 보강, 임계 방향 반전 주의, not-ready 는 `for:` 지연)
 
 ### 테스트 (CLAUDE.md: 파싱/집계/분류 변경 시 회귀 테스트 필수)
-- [ ] **[P1]** `FakeClient` 패턴으로 `summarize` 신규 필드(`by_namespace`, `by_ready`) 회귀 테스트
-- [ ] **[P1]** `render_prometheus_metrics` 신규 라인 + `meta=None` 하위호환 테스트(1-인자 호출 유지 확인)
-- [ ] **[P2]** NotReady 노드·per-node error 스냅샷에서 `node_ready`/`node_collect_error` 방출 검증
+- [ ] **[P1]** `meta=None` 하위호환 + meta 계열(up/last_success/counters) 방출 테스트 — render 에 meta dict 직접 주입(테스트는 `app.services` 만 import; `summarize` 는 순수 dict 집계라 FakeClient 불필요)
 
 ### 문서
 - [ ] **[P2]** README/CLAUDE.md 의 노출 메트릭 목록을 신규 메트릭으로 갱신 (할당 경계 문구 유지)
