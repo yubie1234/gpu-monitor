@@ -15,7 +15,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: gpu-monitor
-  namespace: gpu-monitor
+  namespace: dashboard
   labels:
     release: kube-prometheus-stack     # ← Prometheus podMonitorSelector 에 맞게 교체
 spec:

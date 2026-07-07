@@ -30,7 +30,7 @@
 #     metrics_path: /metrics
 #     scrape_interval: 30s
 #     static_configs:
-#       - targets: ["gpu-monitor.gpu-monitor.svc.cluster.local:80"]
+#       - targets: ["gpu-monitor.dashboard.svc.cluster.local:80"]
 #
 # kube-prometheus-stack 을 쓰면 PodMonitor(deploy/podmonitor.yaml) 또는 아래
 # ServiceMonitor 중 하나만 활성화한다.
@@ -39,7 +39,7 @@
 # kind: ServiceMonitor
 # metadata:
 #   name: gpu-monitor
-#   namespace: gpu-monitor
+#   namespace: dashboard
 #   labels: {release: kube-prometheus-stack}
 # spec:
 #   selector:
@@ -57,7 +57,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
   name: gpu-monitor-rules
-  namespace: gpu-monitor
+  namespace: dashboard
   labels:
     release: kube-prometheus-stack     # ← Prometheus ruleSelector 에 맞게 교체
 spec:
