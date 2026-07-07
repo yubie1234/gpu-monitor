@@ -115,23 +115,17 @@ GPU 사용률(%), VRAM 사용량, 온도, power/클럭. 스냅샷에 원천 데�
 > 예외로 던지지 않으므로 `failures`/`last_success` 는 예상외 예외·루프 정지 전용 신호다 —
 > 통상 수집 실패 감시는 `collect_errors`/`node_collect_error` 가 담당한다.
 
-### PrometheusRule 알럿 (기존 `deploy/prometheus-alerts.yaml` 확장)
+### PrometheusRule 알럿
 
-interval 기본 15s(config.py:28, state.py:27) 기준. `GpuMonitorDown`·`ClusterGpuExhausted`
-(= 아래 `GpuClusterNoFreeCapacity`)·`ClusterGpuHighAllocation` 은 이미 존재 — 신규 관측
-메트릭 도입 후 아래처럼 보강/추가한다.
-
-- `GpuMonitorDown`: `up{job="gpu-monitor"} == 0 or gpu_monitor_up == 0` **for 2m** — 스냅샷 없음(기동 지연/Refresher 미기동).
-- `GpuMonitorStale`: `time() - gpu_monitor_last_success_timestamp_seconds > 3 * 15` **for 5m** — Refresher 예외 지속(무음 정체).
-- `GpuRefresherStalled`: `increase(gpu_monitor_refreshes_total[5m]) == 0 and gpu_monitor_up == 1` — 루프 정지.
-- `GpuRefreshFailing`: `rate(gpu_monitor_refresh_failures_total[10m]) > 0` **for 10m**.
-- `GpuMonitorK8sDisabled`: `gpu_monitor_k8s_enabled == 0 and gpu_monitor_up == 1` — SA 토큰 없음/클러스터 밖 실행(DEMO 아님).
-- `GpuMonitorCollectErrors`: `gpu_monitor_collect_errors > 0` **for 5m** — 노드 목록 수집 실패(RBAC/도달성) → 총량 과소.
-- `GpuNodeCollectError`: `max by(node)(gpu_monitor_node_collect_error) > 0` **for 5m** — 해당 노드 allocation 부정확.
-- `GpuClusterNoFreeCapacity`: `gpu_monitor_cluster_gpu_free == 0` **for 10m** — 스케줄 headroom 소진(model-monitor `CapacityDegraded` 의 할당판 **반전**).
-- `GpuAllocationOnNotReadyNode`: `(gpu_monitor_node_ready == 0) and on(node) (sum by(node)(gpu_monitor_node_gpu{state="allocated"}) > 0)` **for 10m** — booked-but-unschedulable anomaly.
-
-대시보드 어노테이션: `ALERTS{alertname=~"Gpu.*|Node.*", alertstate="firing"}` 오버레이. 실사용률 알럿은 도입하지 않음.
+> **완료(feature/metrics-observability):** 3종 → 10종. 원안에서 정정한 것 —
+> `GpuClusterNoFreeCapacity` 는 **미추가**(기존 `ClusterGpuExhausted` 와 동일 조건인
+> 이중 발화 + `capacity>0` 가드 누락으로 k8s 비활성 시 오발화), `GpuMonitorDown` 은
+> 기존 `absent(up{job})` 가드를 **유지**한 채 `gpu_monitor_up==0` 만 보강(타깃 미발견
+> 침묵 회귀 방지), `GpuMonitorStale` 임계는 refresh 15s×3(45s)이 아니라 **스크레이프
+> 주기 30s 기준 75s**(45s 는 스크레이프 1.5주기라 플랩), `GpuMonitorK8sDisabled` 는
+> `gpu_monitor_demo==0` 조건으로 demo 배포 오발화 제외.
+> 대시보드 어노테이션 regex 는 `Gpu.*|Node.*` 가 아니라 **`.*Gpu.*`** 로 —
+> 기존 `Cluster*` 2종이 앵커드 regex 에 안 걸린다. 실사용률 알럿은 도입하지 않음.
 
 ---
 
@@ -144,8 +138,7 @@ interval 기본 15s(config.py:28, state.py:27) 기준. `GpuMonitorDown`·`Cluste
 - [ ] **[P3]** (선택) `gpu_monitor_product_gpu{product,state}` — 파생 가능하므로 recording rule 우선 검토
 
 ### 배포물
-- [ ] **[P1]** `deploy/grafana-dashboard.json` 신규 — row 4단(개요/장치/워크로드·ns/노드/상태), 어노테이션 오버레이, 템플릿 변수(node/product/namespace), 기존 메트릭만으로 되는 패널 우선
-- [ ] **[P2]** `deploy/prometheus-alerts.yaml` 확장 — 위 알럿 세트 추가(기존 3종은 신규 메트릭으로 보강, 임계 방향 반전 주의, not-ready 는 `for:` 지연)
+- [ ] **[P1]** `deploy/grafana-dashboard.json` 신규 — row 5단(개요/장치/워크로드·ns/노드/상태·수집헬스), 어노테이션 오버레이(`.*Gpu.*`), 템플릿 변수(node/product/namespace), 할당률 분모는 capacity(기존 알럿과 정합) 명시
 
 ### 문서
 - [ ] **[P2]** README/CLAUDE.md 의 노출 메트릭 목록을 신규 메트릭으로 갱신 (할당 경계 문구 유지)

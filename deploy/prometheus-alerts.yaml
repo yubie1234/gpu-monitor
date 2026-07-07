@@ -3,20 +3,25 @@
 # gpu-monitor 는 /metrics 를 노출한다(기본 ON, 끄려면 MONITOR_METRICS=false).
 # 요청 경로에서 수집하지 않고 백그라운드 캐시 스냅샷을 포맷만 하므로 스크레이프가 가볍다.
 #
-# 노출 메트릭(app/services/prometheus.py):
-#   gpu_monitor_build_info{version}                       # 항상 1 (버전 라벨)
-#   gpu_monitor_cluster_gpu_capacity                      # 클러스터 총 GPU
-#   gpu_monitor_cluster_gpu_allocated                     # 할당된 GPU
-#   gpu_monitor_cluster_gpu_free                          # 유휴 GPU
-#   gpu_monitor_node_gpu{node,product,state}              # 노드별 capacity/allocated/free
-#   gpu_monitor_gpu_allocated_by_type{type}               # 워크로드 타입별 할당
+# 노출 메트릭(app/services/prometheus.py — 상세는 README '메트릭' 절):
+#   [할당]   gpu_monitor_cluster_gpu_{capacity,allocated,free}       # 클러스터 총량
+#            gpu_monitor_node_gpu{node,product,state}                # capacity/allocatable/allocated/free
+#            gpu_monitor_gpu_allocated_by_type{type}                 # 워크로드 타입별
+#            gpu_monitor_gpu_allocated_by_namespace{namespace}       # 네임스페이스별
+#            gpu_monitor_gpu_allocated_by_ready{ready}               # Pod ready 별 ("true"/"false")
+#            gpu_monitor_nodes                                       # GPU 노드 수
+#   [정보]   gpu_monitor_build_info{version}, gpu_monitor_node_info{node,product,product_raw}
+#            gpu_monitor_node_ready{node}                            # 1=Ready
+#   [수집헬스] gpu_monitor_up                                        # 스냅샷 존재(0=첫 수집 전)
+#            gpu_monitor_last_success_timestamp_seconds              # 마지막 성공 수집(epoch)
+#            gpu_monitor_collect_errors                              # 스냅샷 수준 수집 오류 수
+#            gpu_monitor_node_collect_error{node,product}            # 노드별 수집 실패(1=과소집계 중)
+#            gpu_monitor_k8s_enabled, gpu_monitor_demo               # 0/1
+#            gpu_monitor_refreshes_total / gpu_monitor_refresh_failures_total  # counter
 #
-# ⚠ 관측성 공백(현재 미구현): 수집 성공/실패 지표(gpu_monitor_up, *_collect_errors)와
-#   마지막 성공 시각(*_last_success_timestamp)이 없다. 따라서:
-#     - "모니터가 죽었는지"는 Prometheus 가 만드는 up{job="gpu-monitor"} 로만 판정 가능.
-#     - "데이터가 stale 한지"(수집이 조용히 실패해 옛 스냅샷이 유지되는 상황)는 메트릭으로
-#       탐지할 수 없다. 이 신호가 필요하면 형제 프로젝트 model-monitor 처럼 up/collect_errors/
-#       last_success_timestamp 게이지를 이식할 것(deploy/../docs/gpu-sharing-plan.md 참고).
+# 주의: failures_total/last_success 는 '예상외 예외·루프 정지' 전용 신호다 —
+#   통상 수집 실패(RBAC 403, 노드 조회 실패)는 build_snapshot 이 예외 없이 흡수하므로
+#   collect_errors / node_collect_error 로 잡는다(아래 GpuMonitorCollectErrors 계열).
 # ---------------------------------------------------------------------------
 
 # === 1) 스크레이프 설정 (Prometheus Operator 없이 쓸 때, prometheus.yml) ======
@@ -27,8 +32,8 @@
 #     static_configs:
 #       - targets: ["gpu-monitor.gpu-monitor.svc.cluster.local:80"]
 #
-# kube-prometheus-stack 을 쓰면 PodMonitor(deploy/k8s.yaml) 또는 아래 ServiceMonitor 중
-# 하나만 활성화한다.
+# kube-prometheus-stack 을 쓰면 PodMonitor(deploy/podmonitor.yaml) 또는 아래
+# ServiceMonitor 중 하나만 활성화한다.
 # ---
 # apiVersion: monitoring.coreos.com/v1
 # kind: ServiceMonitor
@@ -59,21 +64,90 @@ spec:
   groups:
     - name: gpu-monitor.rules
       rules:
+        # ── 모니터 헬스 ──────────────────────────────────────────────────
         # 모니터 자체가 안 보임 — 메트릭 부재가 '정상'으로 오인되지 않게.
-        # gpu_monitor_up 메트릭이 없어 Prometheus 생성 up{} 로 판정한다. up==0 만으로는
-        # '타깃이 발견됐는데 스크레이프 실패'만 잡히고, PodMonitor 라벨/셀렉터가 안 맞아
-        # 타깃이 아예 발견 안 되면 up{} 시계열 자체가 없어 알럿이 침묵한다 → absent() 로 보강.
+        # up==0 만으로는 '타깃이 발견됐는데 스크레이프 실패'만 잡히고, PodMonitor
+        # 라벨/셀렉터가 안 맞아 타깃이 아예 발견 안 되면 up{} 시계열 자체가 없어
+        # 알럿이 침묵한다 → absent() 로 보강(제거 금지). gpu_monitor_up==0 은
+        # 프로세스는 떴는데 스냅샷이 한 번도 안 만들어진 상태(Refresher 미기동).
         - alert: GpuMonitorDown
-          expr: up{job="gpu-monitor"} == 0 or absent(up{job="gpu-monitor"})
+          expr: |
+            up{job="gpu-monitor"} == 0
+            or absent(up{job="gpu-monitor"})
+            or gpu_monitor_up == 0
           for: 5m
           labels: {severity: critical}
           annotations:
-            summary: "gpu-monitor 가 응답하지 않음(스크레이프 실패 또는 타깃 미발견)"
-            description: "스크레이프 실패·첫 수집 전·PodMonitor 미발견 중 하나. 대시보드/메트릭이 stale 이거나 부재."
+            summary: "gpu-monitor 가 응답하지 않거나 스냅샷이 없음"
+            description: "스크레이프 실패·타깃 미발견·첫 수집 전 중 하나. 대시보드/메트릭이 stale 이거나 부재."
 
+        # 수집 정체(무음 stale): 마지막 성공 수집이 오래됨. 임계 75s = 스크레이프
+        # 주기 30s(podmonitor.yaml) × 2 + 여유 15s — refresh 주기(15s) 기준으로
+        # 잡으면 스크레이프 1.5주기라 플랩한다. Refresher 는 통상 실패를 예외 없이
+        # 흡수하므로 이 알럿은 '예상외 예외 반복·루프 정지' 신호다.
+        - alert: GpuMonitorStale
+          expr: time() - gpu_monitor_last_success_timestamp_seconds > 75
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "gpu-monitor 스냅샷 갱신 정체"
+            description: "마지막 성공 수집 이후 {{ $value | humanizeDuration }} 경과. Refresher 예외 반복 또는 정지 의심 — 로그 확인."
+
+        # 루프 정지: 프로세스는 살아 있는데 refresh 시도 자체가 멈춤(heartbeat 부재).
+        - alert: GpuRefresherStalled
+          expr: increase(gpu_monitor_refreshes_total[5m]) == 0 and gpu_monitor_up == 1
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "gpu-monitor Refresher 루프 정지"
+            description: "5분간 refresh 시도가 없음(카운터 정지). 이벤트 루프 블록/태스크 사망 의심."
+
+        # 예상외 예외 반복(빈도 낮음 — 통상 실패는 아래 CollectErrors 가 담당).
+        - alert: GpuRefreshFailing
+          expr: rate(gpu_monitor_refresh_failures_total[10m]) > 0
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: "gpu-monitor refresh 가 예외로 반복 실패"
+            description: "build_snapshot 이 예상외 예외를 던지는 중. 스냅샷이 갱신되지 않고 있을 수 있음."
+
+        # k8s 클라이언트 비활성: SA 토큰 없음/클러스터 밖 실행 → 데이터 전부 빔.
+        # demo 배포(gpu_monitor_demo==1)도 k8s_enabled==0 이므로 제외한다.
+        - alert: GpuMonitorK8sDisabled
+          expr: gpu_monitor_k8s_enabled == 0 and gpu_monitor_demo == 0
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: "gpu-monitor k8s 클라이언트 비활성 (데이터 없음)"
+            description: "in-cluster SA 토큰이 없거나 클러스터 밖 실행. 대시보드/메트릭이 빈 데이터로 유지됨."
+
+        # ── 수집 오류 (RBAC 403 등 '조용한 빈 데이터'를 알림으로 승격) ─────────
+        # 노드 목록 수집 실패: RBAC 미적용/pruned/도달성 문제 → 총량 과소(0 포함).
+        # readyz 는 이 상태에서도 200 을 유지하므로(빈 스냅샷 정상 저장) 이 알럿이 유일한 신호.
+        - alert: GpuMonitorCollectErrors
+          expr: gpu_monitor_collect_errors > 0
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "gpu-monitor 수집 오류 지속"
+            description: "스냅샷 errors {{ $value }}건이 5분 이상. RBAC(nodes/pods list)·API 도달성 확인."
+
+        # 노드별 Pod 조회 실패: 해당 노드 allocated=0/free 미계산으로 조용히 과소집계.
+        - alert: GpuNodeCollectError
+          expr: max by (node) (gpu_monitor_node_collect_error) > 0
+          for: 5m
+          labels: {severity: warning}
+          annotations:
+            summary: "노드 {{ $labels.node }} 의 GPU 할당 수집 실패"
+            description: "해당 노드 allocation 이 과소집계 중(allocated=0 으로 잡힘). 클러스터 합계·할당률도 실제보다 낮게 보임."
+
+        # ── 용량 ────────────────────────────────────────────────────────
         # 클러스터 GPU 완전 소진: 유휴 0 이 지속. 신규 GPU 워크로드가 Pending 으로 쌓임.
-        # 주의: 노드의 Pod 조회가 실패하면 그 노드가 '전량 유휴'로 잡혀 free 가 과대 계상될 수
-        #   있다(수집 실패 시 알려진 한계) → free==0 알럿은 '과소 경보' 방향이라 안전하다.
+        # 주의: 노드의 Pod 조회가 실패하면 그 노드가 '전량 유휴'로 잡혀 free 가 과대 계상될
+        #   수 있다 → free==0 알럿은 '과소 경보' 방향이라 안전하고, 그 수집 실패 자체는
+        #   위 GpuNodeCollectError 가 잡는다.
+        # (TODO.md 의 GpuClusterNoFreeCapacity 는 이 룰과 동일 조건이라 추가하지 않음 —
+        #  게다가 그 식에는 capacity>0 가드가 없어 k8s 비활성 시 오발화한다.)
         - alert: ClusterGpuExhausted
           expr: |
             gpu_monitor_cluster_gpu_free == 0
@@ -85,8 +159,8 @@ spec:
             description: "클러스터 유휴 GPU 가 0 인 상태로 15분 이상. 신규 GPU 워크로드가 Pending 으로 쌓일 수 있음."
 
         # 고할당 경고: 할당률 90% 초과 지속 — 여유가 거의 없음(소진 임박).
-        # 주의: ClusterGpuExhausted 와 마찬가지로, 노드 Pod 조회 실패 시 그 노드가 allocated=0
-        #   으로 잡혀 할당률이 실제보다 낮게 계산된다 → 이 알럿도 '과소 경보' 방향(미탐 가능).
+        # 주의: 노드 Pod 조회 실패 시 그 노드가 allocated=0 으로 잡혀 할당률이 실제보다
+        #   낮게 계산된다(과소 경보 방향, 미탐 가능) — GpuNodeCollectError 와 함께 볼 것.
         - alert: ClusterGpuHighAllocation
           expr: |
             gpu_monitor_cluster_gpu_allocated
@@ -96,3 +170,16 @@ spec:
           annotations:
             summary: "클러스터 GPU 할당률 90% 초과"
             description: "할당률 {{ $value | humanizePercentage }} 가 30분 이상. GPU 증설 또는 워크로드 정리 검토."
+
+        # ── 이상 징후 ────────────────────────────────────────────────────
+        # NotReady 노드 위에 할당이 남아 있음: 점유는 됐는데 스케줄 불가(booked-but-
+        # unschedulable). 노드 재기동 직후는 정상일 수 있어 for: 로 지연.
+        - alert: GpuAllocationOnNotReadyNode
+          expr: |
+            (gpu_monitor_node_ready == 0)
+            and on(node) (sum by (node) (gpu_monitor_node_gpu{state="allocated"}) > 0)
+          for: 10m
+          labels: {severity: warning}
+          annotations:
+            summary: "NotReady 노드 {{ $labels.node }} 에 GPU 할당 잔존"
+            description: "노드가 NotReady 인데 GPU 할당이 남아 있음(10분 이상). 좀비 점유/노드 장애 확인."
