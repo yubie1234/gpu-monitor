@@ -387,7 +387,8 @@ function render(snap){
         prodKeys.map(p=>esc(p)+" "+n(prodPhys(p))).join(" · "))
     + vizCard("물리 GPU", "viz-phys",
         legendHTML(physLeg) + partHTML,
-        "할당률 "+pct+"% · 온전 "+n(cap))
+        // 할당률은 known(=온전-미상) 기준 — 미상이 있으면 분모가 다름을 명시.
+        "할당률 "+pct+"% · 온전 "+n(cap)+(unknown>0? " (미상 "+n(unknown)+" 제외)":""))
     + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "할당 "+n(alloc)+" GPU 기준")
     + vizCard("사용 목적", "viz-purpose", legendHTML(purpLeg), "할당 "+n(alloc)+" GPU 기준")
     + vizCard("배포 환경", "viz-env", legendHTML(envLeg), "할당 "+n(alloc)+" GPU 기준");
@@ -419,10 +420,13 @@ function nodeMatches(nd, q){
 }
 
 // 장치 필터 <select> 를 스냅샷 제품 목록으로 채운다(현재 선택은 가능한 한 보존).
+// 목록이 그대로면 재빌드하지 않는다 — 자동 새로고침 중 열린 드롭다운이 닫히지 않게.
 function fillProducts(nodes){
   const sel = $("#prod"); if(!sel) return;
-  const cur = sel.value;
   const prods = Array.from(new Set(nodes.map(nd=>nd.product||"GPU"))).sort();
+  const have = Array.from(sel.options).slice(1).map(o=>o.value);
+  if(have.length===prods.length && have.every((v,i)=>v===prods[i])) return;
+  const cur = sel.value;
   sel.innerHTML = ['<option value="">전체 장치</option>'].concat(
     prods.map(p=>'<option value="'+esc(p)+'">'+esc(p)+'</option>')).join("");
   if(cur && prods.indexOf(cur)>=0) sel.value = cur;
@@ -716,7 +720,7 @@ function updateAge(){
   const stale = age > STALE_MS;
   $("#updated").textContent = LAST_TS + " · " + relTime(sec) + (stale? " ⚠ 정체":"");
   $("#updated").title = stale
-    ? "스냅샷이 "+sec+"초째 그대로 — 백그라운드 수집이 지연됐을 수 있습니다"
+    ? "스냅샷이 "+sec+"초째 갱신되지 않음 — 자동 새로고침이 꺼졌거나 수집이 지연됐을 수 있습니다"
     : "마지막 수집 시각";
   $("#livedot").style.background = stale? "var(--warn)":"var(--up)";
 }
