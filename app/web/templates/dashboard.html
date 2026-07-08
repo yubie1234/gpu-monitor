@@ -134,6 +134,13 @@
   .pbadge.b-mps{color:#e8935a;border-color:rgba(232,147,90,.5);background:rgba(232,147,90,.12)}
   .pbadge.b-mig{color:#4cc4c0;border-color:rgba(76,196,192,.5);background:rgba(76,196,192,.12)}
   .shared-hd .tsbadge.mig{color:#4cc4c0;border-color:rgba(76,196,192,.45);background:rgba(76,196,192,.1)}
+  /* 물리 GPU 카드 내 '분할 상세' (분할 N장 → 무엇) */
+  .partlead{font-family:var(--mono);font-size:10.5px;color:var(--gpu);margin-top:9px}
+  .partlist{display:flex;flex-direction:column;gap:5px;margin-top:5px}
+  .partline{display:flex;align-items:center;gap:8px}
+  .partline .pname{font-family:var(--mono);font-size:11.5px;color:#c7a6f5;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .partline .pstat{font-family:var(--mono);font-size:11px;color:var(--faint);margin-left:auto;white-space:nowrap}
 
   /* 도트 매트릭스 (셀 1개 = GPU/슬롯 1개; 개수 많으면 스크립트가 와플로 전환) */
   .dmwrap{display:flex;flex-wrap:wrap;gap:4px;margin:1px 0}
@@ -262,29 +269,24 @@ function render(snap){
   const cap=s.gpu_capacity||0, alloc=s.gpu_allocated||0, free=s.gpu_free||0;
   const pct = cap? Math.round(alloc/cap*100):0;
 
-  // 물리 GPU / 공유(타임슬라이스) 슬롯 — 온전 GPU 와 단위가 다르다.
+  // 물리 GPU + 파티션(공유/MIG) — 온전 GPU 와 단위가 다르다.
   const physical = s.gpu_physical||0, sharedBacking = s.gpu_shared_backing||0;
   const shared = s.shared || {};
-  const sCap = shared.capacity||0, sAlloc = shared.allocated||0, sFree = shared.free||0;
-  const byProfile = shared.by_profile || {};
+  const sharedPools = shared.pools || {};
 
-  // 규모별 하이브리드: 클러스터 집계는 도넛/게이지/링(규모 무관), 범주는 도넛/랭킹.
+  // 클러스터 집계: 물리 도넛(할당률·분할 상세 흡수) + 워크로드 도넛 + 네임스페이스 랭킹.
   // Canvas 는 innerHTML 세팅 후 그려야 하므로 draws 에 모아 마지막에 실행.
   const products = s.products || {};
   const prodKeys = Object.keys(products);
   const prodPhys = p => products[p].physical!=null? products[p].physical : (products[p].capacity||0);
   const draws = [];
 
-  // 물리 GPU — 도넛 (할당/유휴/슬라이스)
+  // 물리 GPU — 도넛 (할당/유휴/분할). 할당률과 '분할이 무엇인지'를 이 카드에 흡수.
   const physSegs = [{v:alloc,color:COL.alloc},{v:free,color:COL.free}];
   const physLeg = [{color:COL.alloc,label:"할당",v:alloc},{color:COL.free,label:"유휴",v:free}];
   if(sharedBacking>0){ physSegs.push({v:sharedBacking,color:COL.slice});
     physLeg.push({color:COL.slice,label:"분할",v:sharedBacking,suffix:"장"}); }
   draws.push(()=>drawDonut("viz-phys", physSegs, physical||1, n(physical), "물리 GPU"));
-
-  // 할당률 — 반원 게이지 (온전 20/23)
-  draws.push(()=>drawGauge("viz-rate", [{v:alloc,color:COL.alloc},{v:free,color:COL.free}],
-      cap||1, pct+"%", "할당 "+n(alloc)+" / "+n(cap)));
 
   // 워크로드 타입 — 도넛
   const byType = s.by_workload_type || {};
@@ -298,40 +300,22 @@ function render(snap){
   const byNs = s.by_namespace || {};
   const nsItems = Object.keys(byNs).map(k=>({color:productColor(k),label:k,v:byNs[k]}));
 
-  // Pod ready — 미니 링
-  const byReady = s.by_ready || {};
-  const rT = byReady.true||0, rF = byReady.false||0, rTot = rT+rF;
-  const readyPct = rTot? Math.round(rT/rTot*100):100;
-  draws.push(()=>drawRing("viz-ready", [{v:rT,color:COL.free},{v:rF,color:COL.down}],
-      rTot||1, readyPct+"%", "ready "+n(rT)+"/"+n(rTot)));
-
-  // 공유 슬롯 — 미니 링 (있을 때만)
-  const spct = sCap? Math.round(sAlloc/sCap*100):0;
-  if(sCap>0){ draws.push(()=>drawRing("viz-slot",
-      [{v:sAlloc,color:COL.alloc},{v:sFree,color:COL.free}], sCap||1, spct+"%",
-      "슬롯 "+n(sAlloc)+"/"+n(sCap))); }
+  // '분할 N장'이 무엇인지 — 리소스별 모드/프로파일/슬롯 상세를 물리 카드 안에 표시.
+  const partHTML = (sharedBacking>0 || Object.keys(sharedPools).length)
+    ? '<div class="partlead">분할 '+n(sharedBacking)+'장 →</div>' + partitionHTML(sharedPools)
+    : "";
 
   let cardsHtml =
     card("GPU 노드", n(s.node_count),
         prodKeys.map(p=>esc(p)+" "+n(prodPhys(p))).join(" · "))
-    + vizCard("물리 GPU", "viz-phys", legendHTML(physLeg),
-        sharedBacking? ("온전 "+n(cap)+" · 슬라이스 "+n(sharedBacking)+"장") : "nvidia.com/gpu.count")
-    + vizCard("할당률", "viz-rate",
-        legendHTML([{color:COL.alloc,label:"할당",v:alloc},{color:COL.free,label:"유휴",v:free}]),
-        "온전 GPU 기준");
-  if(sCap>0){
-    cardsHtml += vizCard("공유 슬롯", "viz-slot",
-      legendHTML(Object.keys(byProfile).map(pf=>({color:COL.slice,label:pf,
-        v:byProfile[pf].allocated, suffix:"/"+n(byProfile[pf].capacity)}))),
-      "타임슬라이스"+(sharedBacking? " · 물리 "+n(sharedBacking)+"장":""));
-  }
-  cardsHtml += vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "");
+    + vizCard("물리 GPU", "viz-phys",
+        legendHTML(physLeg) + partHTML,
+        "할당률 "+pct+"% · 온전 "+n(cap))
+    + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "");
   if(nsItems.length){
     cardsHtml += '<div class="card"><div class="label">네임스페이스별 할당</div>'
       + rankedHTML(nsItems, alloc) + '</div>';
   }
-  cardsHtml += vizCard("Pod ready", "viz-ready",
-      legendHTML([{color:COL.free,label:"ready",v:rT},{color:COL.down,label:"not",v:rF}]), "");
   $("#cards").innerHTML = cardsHtml;
   draws.forEach(fn=>{ try{ fn(); }catch(e){} });
 
@@ -373,6 +357,20 @@ function rankedHTML(items, total){
     +'<span class="rl">'+esc(it.label)+'</span>'
     +'<span class="rv">'+n(it.v)+'</span>'
     +'<span class="rp">'+(total?Math.round((it.v||0)/total*100):0)+'%</span></div>').join("")+'</div>';
+}
+
+// '분할 N장 → 무엇' 상세: 리소스별 모드 배지 + 프로파일 + 슬롯/인스턴스 (물리 카드 안).
+function partitionHTML(pools){
+  const list = Object.keys(pools).map(k=>pools[k]);
+  if(!list.length) return "";
+  list.sort((a,b)=>(b.capacity||0)-(a.capacity||0));
+  return '<div class="partlist">'+list.map(p=>{
+    const m = modeOf(p.mode), unit = m==="mig"?"인스턴스":"슬롯";
+    return '<div class="partline">'
+      +'<span class="pbadge b-'+(MODE_CELL[m]||"ts")+'">'+(MODE_LABEL[m]||"공유")+'</span>'
+      +'<span class="pname">'+esc(p.profile||p.resource)+'</span>'
+      +'<span class="pstat">'+n(p.allocated)+'/'+n(p.capacity)+' '+unit+'</span></div>';
+  }).join("")+'</div>';
 }
 
 // 도트 매트릭스 — 셀 1개 = 1개(GPU/슬롯). 개수>DOT_MAX 면 와플(1칸=k개)로 자동 전환.
@@ -421,22 +419,6 @@ function drawDonut(id,segs,total,big,small,sz){
   ctx.lineWidth=th; ctx.lineCap="butt";
   ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.strokeStyle=COL.track; ctx.stroke();
   _arc(ctx,cx,cy,r,-Math.PI/2,Math.PI*2,segs,total,0.03);
-  _center(ctx,cx,cy,big,small,Math.round(sz*0.25));
-}
-function drawGauge(id,segs,total,big,small){
-  const w=200,h=116; const ctx=_setup(id,w,h); if(!ctx) return;
-  const cx=w/2,cy=h-14,r=w/2-16,th=22; ctx.lineWidth=th; ctx.lineCap="butt";
-  ctx.beginPath(); ctx.arc(cx,cy,r,Math.PI,2*Math.PI); ctx.strokeStyle=COL.track; ctx.stroke();
-  _arc(ctx,cx,cy,r,Math.PI,Math.PI,segs,total,0);
-  ctx.textAlign="center"; ctx.fillStyle=COL.text; ctx.font="650 27px "+MONO; ctx.fillText(big,cx,cy-6);
-  ctx.fillStyle=COL.muted; ctx.font="600 10px "+MONO; ctx.fillText(small,cx,cy+10);
-}
-function drawRing(id,segs,total,big,small,sz){
-  sz=sz||110; const ctx=_setup(id,sz,sz); if(!ctx) return;
-  const cx=sz/2,cy=sz/2,th=Math.round(sz*0.16),r=sz/2-3-th/2;
-  ctx.lineWidth=th; ctx.lineCap="butt";
-  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.strokeStyle=COL.track; ctx.stroke();
-  _arc(ctx,cx,cy,r,-Math.PI/2,Math.PI*2,segs,total,segs.length>1?0.03:0);
   _center(ctx,cx,cy,big,small,Math.round(sz*0.25));
 }
 

@@ -403,7 +403,7 @@ class TestSummarize(unittest.TestCase):
         self.assertEqual(s["gpu_physical"], s["gpu_capacity"])
         self.assertEqual(s["gpu_shared_backing"], 0)
         self.assertEqual(s["shared"], {"capacity": 0, "allocated": 0, "free": 0,
-                                       "by_profile": {}, "by_mode": {}})
+                                       "by_profile": {}, "by_mode": {}, "pools": {}})
 
     def test_shared_and_physical_aggregation(self):
         snap = {"nodes": [
@@ -447,6 +447,10 @@ class TestSummarize(unittest.TestCase):
                          {"capacity": 8, "allocated": 3, "free": 5})
         self.assertEqual(s["shared"]["by_mode"]["mig"],
                          {"capacity": 7, "allocated": 5, "free": 2})
+        # pools: 리소스별(여기선 profile 폴백) mode/profile 포함 — '분할이 무엇인지' 표시용
+        self.assertEqual(s["shared"]["pools"]["1g.10gb"]["mode"], "mig")
+        self.assertEqual(s["shared"]["pools"]["1g.10gb"]["allocated"], 5)
+        self.assertEqual(s["shared"]["pools"]["10gb"]["mode"], "timeslice")
 
     def test_by_workload_type(self):
         s = summarize(self._snap())
