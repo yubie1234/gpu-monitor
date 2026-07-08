@@ -102,6 +102,9 @@ spec:
             # - { name: MONITOR_NODE_SELECTOR, value: "nvidia.com/gpu.present=true" }
             # path prefix 뒤 노출(아래 Ingress 와 동일 prefix). 루트로 쓰려면 이 줄 제거.
             - { name: MONITOR_ROOT_PATH, value: "/service/gpu-monitor" }
+            # 히스토리·추세는 Grafana 담당 — 대시보드 헤더에 딥링크만 건다(외부 절대 URL).
+            # 미설정이면 링크 숨김. deploy/grafana-dashboard.json import 한 대시보드 URL 권장.
+            # - { name: MONITOR_GRAFANA_URL, value: "https://grafana.example.com/d/gpu-alloc/gpu" }
           ports:
             - { containerPort: 8089, name: http }
           # startupProbe: lifespan 이 "첫 수집 완료"까지 서버 기동을 블록한다

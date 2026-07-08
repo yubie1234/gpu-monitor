@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     interval: float = Field(15.0, validation_alias=AliasChoices("MONITOR_INTERVAL"))
     demo: bool = Field(False, validation_alias=AliasChoices("MONITOR_DEMO"))
     root_path: str = Field("", validation_alias=AliasChoices("MONITOR_ROOT_PATH"))
+    # 히스토리·추세는 Prometheus/Grafana 담당 — 대시보드는 딥링크만 건다(비우면 숨김).
+    grafana_url: str = Field("", validation_alias=AliasChoices("MONITOR_GRAFANA_URL"))
 
     # --- 수집 ---
     node_label_selector: Optional[str] = Field(
