@@ -48,15 +48,9 @@
   .card .val{font-family:var(--mono);font-size:26px;font-weight:600;
     font-variant-numeric:tabular-nums;line-height:1}
   .card .sub{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-top:6px}
-  .val.good{color:var(--up)} .val.warn{color:var(--warn)} .val.gpuval{color:var(--gpu)}
-  .val.accent{color:var(--accent)}
 
-  /* 세그먼트 바 (장치별/할당) */
-  .gpusub{display:flex;flex-direction:column;gap:6px;margin-top:9px}
-  .gbar{display:flex;height:10px;width:100%;border-radius:4px;overflow:hidden;
-    border:1px solid var(--border);background:var(--surface2)}
-  .gbar i{display:block;height:100%}
-  .glegend{display:flex;gap:10px;flex-wrap:wrap}
+  /* 범례 (도넛 아래) */
+  .glegend{display:flex;gap:10px;flex-wrap:wrap;margin-top:9px}
   .glegend span{font-family:var(--mono);font-size:10px;color:var(--muted);
     display:inline-flex;align-items:center;gap:4px}
   .glegend i{width:8px;height:8px;border-radius:2px;display:inline-block}
@@ -78,15 +72,14 @@
   .prodchip{font-family:var(--mono);font-size:10.5px;font-weight:600;color:#c7a6f5;
     background:rgba(176,131,240,.1);border:1px solid rgba(176,131,240,.4);
     border-radius:20px;padding:1px 9px}
+  /* 만석(온전 GPU 유휴 0) 노드 뱃지 — 테두리색만으로는 스캔이 어려워 명시 라벨 부여 */
+  .fullbadge{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--warn);
+    background:rgba(210,153,34,.14);border:1px solid rgba(210,153,34,.5);
+    border-radius:20px;padding:1px 8px;letter-spacing:.05em}
   .nspacer{flex:1}
   .nstat{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
   .nstat b{color:var(--text);font-variant-numeric:tabular-nums}
   .nstat .free{color:var(--up)} .nstat .free.none{color:var(--warn)}
-
-  .allocbar{display:flex;height:14px;width:100%;border-radius:5px;overflow:hidden;
-    border:1px solid var(--border);background:var(--surface2)}
-  .allocbar i{display:block;height:100%;border-right:1px solid rgba(13,17,23,.6)}
-  .allocbar i:last-child{border-right:none}
 
   .allocs{display:flex;flex-direction:column;gap:6px}
   .alloc{display:flex;align-items:center;gap:9px;font-size:12.5px;
@@ -106,6 +99,67 @@
   .wtype.etc{color:var(--muted);border-color:var(--border);background:var(--surface)}
   .notready-tag{color:var(--warn)}
   .idle{color:var(--faint);font-style:italic;font-size:12px;padding:4px 2px}
+
+  /* 노드 물리 재구성 (물리 / 온전 / 슬라이스로 빠진 장수) */
+  .nrecon{font-family:var(--mono);font-size:11px;color:var(--faint);
+    display:flex;gap:12px;flex-wrap:wrap;margin-top:-6px}
+  .nrecon b{color:var(--muted);font-variant-numeric:tabular-nums}
+  .nrecon .slice b{color:var(--warn)}
+
+  /* 공유(타임슬라이스/MPS) 풀 섹션 */
+  .shared{display:flex;flex-direction:column;gap:11px;
+    border-top:1px dashed var(--border);padding-top:11px}
+  .shared-hd{font-family:var(--mono);font-size:10px;text-transform:uppercase;
+    letter-spacing:.06em;color:var(--muted);display:flex;align-items:center;gap:8px}
+  .shared-hd .tsbadge{font-weight:700;color:#e9c46a;text-transform:none;letter-spacing:0;
+    border:1px solid rgba(210,153,34,.45);background:rgba(210,153,34,.1);
+    border-radius:20px;padding:1px 8px}
+  .pool{display:flex;flex-direction:column;gap:6px}
+  .pool-hd{display:flex;align-items:center;gap:9px}
+  .poolname{font-family:var(--mono);font-weight:650;font-size:12px;color:#c7a6f5}
+  .poolstat{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
+  .poolstat b{color:var(--text);font-variant-numeric:tabular-nums}
+  .poolstat .free{color:var(--up)} .poolstat .free.none{color:var(--warn)}
+  .pool-hd .parrow{color:var(--gpu);font-family:var(--mono);font-size:12px}
+  .pbadge{font-family:var(--mono);font-size:9px;font-weight:700;padding:0 6px;
+    border-radius:5px;border:1px solid;white-space:nowrap}
+  .pbadge.b-ts{color:#e9c46a;border-color:rgba(210,153,34,.5);background:rgba(210,153,34,.1)}
+  .pbadge.b-mps{color:#e8935a;border-color:rgba(232,147,90,.5);background:rgba(232,147,90,.12)}
+  .pbadge.b-mig{color:#4cc4c0;border-color:rgba(76,196,192,.5);background:rgba(76,196,192,.12)}
+  .shared-hd .tsbadge.mig{color:#4cc4c0;border-color:rgba(76,196,192,.45);background:rgba(76,196,192,.1)}
+  /* 물리 GPU 카드 내 '분할 상세' (분할 N장 → 무엇) */
+  .partlead{font-family:var(--mono);font-size:10.5px;color:var(--gpu);margin-top:9px}
+  .partlist{display:flex;flex-direction:column;gap:5px;margin-top:5px}
+  .partline{display:flex;align-items:center;gap:8px}
+  .partline .pname{font-family:var(--mono);font-size:11.5px;color:#c7a6f5;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .partline .pstat{font-family:var(--mono);font-size:11px;color:var(--faint);margin-left:auto;white-space:nowrap}
+
+  /* 도트 매트릭스 (셀 1개 = GPU/슬롯 1개; 개수 많으면 스크립트가 와플로 전환) */
+  .dmwrap{display:flex;flex-wrap:wrap;gap:4px;margin:1px 0}
+  .dm{width:17px;height:17px;border-radius:4px;border:1px solid rgba(0,0,0,.28);flex:none}
+  .dm.sm{width:14px;height:14px;border-radius:3px}
+  .dm.empty{background:var(--surface2);border-color:var(--border)}
+  /* 파티션 모드 테두리: MIG 실선(격리) · TS/MPS 점선(소프트) · parent 링(부모 물리장) */
+  .dm.ts{border-style:dashed}
+  .dm.mps{border-style:dashed;border-color:rgba(232,147,90,.65)}
+  .dm.mig{border-color:rgba(76,196,192,.8)}
+  .dm.parent{box-shadow:0 0 0 2px rgba(176,131,240,.55)}
+  .dm.parent.mig{box-shadow:0 0 0 2px rgba(76,196,192,.6)}
+  .dmnote{font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:5px}
+
+  /* 클러스터 카드 내 Canvas 도넛 */
+  .vizbox{display:flex;justify-content:center;padding:6px 0 2px}
+  canvas{display:block}
+
+  /* 랭킹 비중 리스트 (막대 대신 순위+개수+%) */
+  .ranks{display:flex;flex-direction:column;gap:1px;margin-top:8px}
+  .rank{display:flex;align-items:center;gap:9px;padding:5px 4px;border-radius:6px}
+  .rank .rk{font-family:var(--mono);font-size:10px;color:var(--faint);width:14px}
+  .rank .rd{width:9px;height:9px;border-radius:2px;flex:none}
+  .rank .rl{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+  .rank .rv{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:12.5px}
+  .rank .rp{font-family:var(--mono);color:var(--faint);font-size:11px;width:40px;text-align:right}
 
   .empty{color:var(--muted);padding:26px;text-align:center;font-style:italic;
     border:1px solid var(--border);border-radius:9px;background:var(--surface)}
@@ -136,12 +190,13 @@
 
   <section id="nodes-sec">
     <div class="sec-title">노드별 GPU
-      <span class="src">capacity / allocated / free · Pod 이 점유한 nvidia.com/gpu</span>
+      <span class="src">온전 capacity / allocated / free · 공유 풀(타임슬라이스)은 슬롯 단위 별도</span>
     </div>
     <div class="nodes" id="nodes"></div>
   </section>
 
-  <footer id="foot">gpu-monitor · 표준 라이브러리 수집 · 데이터 출처: Kubernetes API (nodes, pods)</footer>
+  <footer id="foot">gpu-monitor · 표준 라이브러리 수집 · 데이터 출처: Kubernetes API (nodes, pods)
+    · <span class="notready-tag">◌</span>/NotReady = Pod·노드 미준비 상태</footer>
 </div>
 
 <script>
@@ -175,6 +230,24 @@ function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,
   c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function n(v){ return (v==null||isNaN(Number(v)))?"–":Number(v).toLocaleString(); }
 
+// Canvas 는 CSS 변수를 못 쓰므로 팔레트를 hex 로 고정(대시보드 :root 와 동일값).
+const COL = {alloc:"#d29922", free:"#3fb950", slice:"#b083f0", accent:"#6e8bff",
+  track:"#1b222c", text:"#e6edf3", muted:"#8b97a7", down:"#f85149"};
+const MONO = 'ui-monospace,Menlo,Consolas,monospace';
+// 도트가 벽이 되지 않게: 개수가 이보다 크면 와플(1칸=k개)로 자동 전환.
+const DOT_MAX = 48;
+
+// 파티션 모드 — 색/배지/도트 테두리 클래스. mig 는 하드웨어 격리(실선), ts/mps 는 소프트(점선).
+const MODE_COLOR = {timeslice:"#b083f0", mps:"#e8935a", mig:"#4cc4c0", shared:"#b083f0", mixed:"#8f7fe8"};
+const MODE_LABEL = {timeslice:"TS", mps:"MPS", mig:"MIG", shared:"공유", mixed:"혼합"};
+const MODE_CELL  = {timeslice:"ts", mps:"mps", mig:"mig", shared:"ts", mixed:"ts"};
+function modeOf(m){ return m || "timeslice"; }
+function nodePartMode(nd){
+  const modes = [];
+  (nd.shared_pools||[]).forEach(p=>{ const m=modeOf(p.mode); if(modes.indexOf(m)<0) modes.push(m); });
+  return modes.length===0 ? "timeslice" : (modes.length===1 ? modes[0] : "mixed");
+}
+
 function render(snap){
   $("#ver").textContent = snap.version ? ("v"+snap.version) : "";
   $("#updated").textContent = snap.ts || "—";
@@ -190,35 +263,57 @@ function render(snap){
   const cap=s.gpu_capacity||0, alloc=s.gpu_allocated||0, free=s.gpu_free||0;
   const pct = cap? Math.round(alloc/cap*100):0;
 
-  // 장치별 세그먼트 바 (capacity 기준) — 제품마다 고유 색.
+  // 물리 GPU + 파티션(공유/MIG) — 온전 GPU 와 단위가 다르다.
+  const physical = s.gpu_physical||0, sharedBacking = s.gpu_shared_backing||0;
+  const shared = s.shared || {};
+  const sharedPools = shared.pools || {};
+
+  // 클러스터 집계: 물리 도넛(할당률·분할 상세 흡수) + 워크로드 도넛 + 네임스페이스 랭킹.
+  // Canvas 는 innerHTML 세팅 후 그려야 하므로 draws 에 모아 마지막에 실행.
   const products = s.products || {};
   const prodKeys = Object.keys(products);
-  let prodBar="", prodLeg="";
-  prodKeys.forEach((p)=>{
-    const c = productColor(p);
-    const w = cap? (products[p].capacity/cap*100):0;
-    prodBar += '<i title="'+esc(p)+' · '+n(products[p].capacity)+' GPU" style="width:'+w+'%;background:'+c+'"></i>';
-    prodLeg += '<span><i style="background:'+c+'"></i>'+esc(p)+' '+n(products[p].capacity)+'</span>';
-  });
+  const prodPhys = p => products[p].physical!=null? products[p].physical : (products[p].capacity||0);
+  const draws = [];
 
-  // 타입별 할당 세그먼트 바 (allocated 기준)
+  // 물리 GPU — 도넛 (할당/유휴/분할). 할당률과 '분할이 무엇인지'를 이 카드에 흡수.
+  const physSegs = [{v:alloc,color:COL.alloc},{v:free,color:COL.free}];
+  const physLeg = [{color:COL.alloc,label:"할당",v:alloc},{color:COL.free,label:"유휴",v:free}];
+  if(sharedBacking>0){ physSegs.push({v:sharedBacking,color:COL.slice});
+    physLeg.push({color:COL.slice,label:"분할",v:sharedBacking,suffix:"장"}); }
+  draws.push(()=>drawDonut("viz-phys", physSegs, physical||1, n(physical), "물리 GPU"));
+
+  // 워크로드 타입 — 도넛
   const byType = s.by_workload_type || {};
   const typeKeys = Object.keys(byType).sort((a,b)=>byType[b]-byType[a]);
-  let typeBar="", typeLeg="";
-  typeKeys.forEach(t=>{
-    const w = alloc? (byType[t]/alloc*100):0;
-    typeBar += '<i style="width:'+w+'%;background:'+typeColor(t)+'"></i>';
-    typeLeg += '<span><i style="background:'+typeColor(t)+'"></i>'+esc(t)+' '+n(byType[t])+'</span>';
-  });
+  const typeSegs = typeKeys.map(t=>({v:byType[t],color:typeColor(t)}));
+  const typeLeg = typeKeys.map(t=>({color:typeColor(t),label:t,v:byType[t],
+      pct: alloc?Math.round(byType[t]/alloc*100):0}));
+  draws.push(()=>drawDonut("viz-type", typeSegs, alloc||1, n(alloc), "할당 GPU"));
 
-  $("#cards").innerHTML =
-    card("GPU 노드", n(s.node_count), prodKeys.map(p=>esc(p)+" "+n(products[p].capacity)).join(" · "))
-    + card("총 GPU", n(cap), "capacity",
-        prodBar? '<div class="gpusub"><div class="gbar">'+prodBar+'</div><div class="glegend">'+prodLeg+'</div></div>':"")
-    + card("할당됨", n(alloc), pct+"% 사용 중", "", "warn")
-    + card("유휴", n(free), free? "여유 있음":"여유 없음", "", free? "good":"warn")
-    + card("워크로드 타입", n(typeKeys.length), typeKeys.slice(0,3).join(" · "),
-        typeBar? '<div class="gpusub"><div class="gbar">'+typeBar+'</div><div class="glegend">'+typeLeg+'</div></div>':"");
+  // 네임스페이스 — 랭킹 리스트 (범주가 많아도 안 깨짐)
+  const byNs = s.by_namespace || {};
+  const nsItems = Object.keys(byNs).map(k=>({color:productColor(k),label:k,v:byNs[k]}));
+
+  // '분할 N장'이 무엇인지 — 리소스별 모드/프로파일/슬롯 상세를 물리 카드 안에 표시.
+  // backing 이 0/미상(gpu.count 라벨 없음)이라도 풀이 있으면 상세는 보여주되 '0장' 오표기는 피한다.
+  const partHTML = Object.keys(sharedPools).length
+    ? '<div class="partlead">'+(sharedBacking>0? "분할 "+n(sharedBacking)+"장 →" : "분할 →")+'</div>'
+      + partitionHTML(sharedPools)
+    : "";
+
+  let cardsHtml =
+    card("GPU 노드", n(s.node_count),
+        prodKeys.map(p=>esc(p)+" "+n(prodPhys(p))).join(" · "))
+    + vizCard("물리 GPU", "viz-phys",
+        legendHTML(physLeg) + partHTML,
+        "할당률 "+pct+"% · 온전 "+n(cap))
+    + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "할당 "+n(alloc)+" GPU 기준");
+  if(nsItems.length){
+    cardsHtml += '<div class="card"><div class="label">네임스페이스별 할당</div>'
+      + rankedHTML(nsItems, alloc) + '</div>';
+  }
+  $("#cards").innerHTML = cardsHtml;
+  draws.forEach(fn=>{ try{ fn(); }catch(e){} });
 
   // 노드
   const nodes = snap.nodes || [];
@@ -235,20 +330,125 @@ function card(label,val,sub,extra,cls){
     +(sub?'<div class="sub">'+esc(sub)+'</div>':"")+(extra||"")+'</div>';
 }
 
+// 값(숫자) 대신 Canvas 도넛을 담는 카드
+function vizCard(label, canvasId, legend, sub){
+  return '<div class="card"><div class="label">'+esc(label)+'</div>'
+    +'<div class="vizbox"><canvas id="'+canvasId+'"></canvas></div>'
+    +(legend||"")+(sub?'<div class="sub">'+esc(sub)+'</div>':"")+'</div>';
+}
+
+// 범례 (도넛 아래). items: [{color,label,v,pct?,suffix?}]
+function legendHTML(items){
+  return '<div class="glegend">'+items.map(it=>
+    '<span><i style="background:'+it.color+'"></i>'+esc(it.label)+' <b>'+n(it.v)+'</b>'
+    +(it.suffix?esc(it.suffix):"")+(it.pct!=null?' · '+it.pct+'%':"")+'</span>').join("")+'</div>';
+}
+
+// 랭킹 비중 리스트 — 막대 없이 순위+개수+%로 비중 전달 (범주 많아도 안전)
+function rankedHTML(items, total){
+  const sorted = items.slice().sort((a,b)=>(b.v||0)-(a.v||0));
+  return '<div class="ranks">'+sorted.map((it,i)=>
+    '<div class="rank"><span class="rk">'+(i+1)+'</span>'
+    +'<span class="rd" style="background:'+it.color+'"></span>'
+    +'<span class="rl">'+esc(it.label)+'</span>'
+    +'<span class="rv">'+n(it.v)+'</span>'
+    +'<span class="rp">'+(total?Math.round((it.v||0)/total*100):0)+'%</span></div>').join("")+'</div>';
+}
+
+// '분할 N장 → 무엇' 상세: 리소스별 모드 배지 + 프로파일 + 슬롯/인스턴스 (물리 카드 안).
+function partitionHTML(pools){
+  const list = Object.keys(pools).map(k=>pools[k]);
+  if(!list.length) return "";
+  list.sort((a,b)=>(b.capacity||0)-(a.capacity||0));
+  return '<div class="partlist">'+list.map(p=>{
+    const m = modeOf(p.mode), unit = m==="mig"?"인스턴스":"슬롯";
+    return '<div class="partline">'
+      +'<span class="pbadge b-'+(MODE_CELL[m]||"ts")+'">'+(MODE_LABEL[m]||"공유")+'</span>'
+      +'<span class="pname">'+esc(p.profile||p.resource)+'</span>'
+      +'<span class="pstat">'+n(p.allocated)+'/'+n(p.capacity)+' '+unit+'</span></div>';
+  }).join("")+'</div>';
+}
+
+// 도트 매트릭스 — 셀 1개 = 1개(GPU/슬롯). 개수>DOT_MAX 면 와플(1칸=k개)로 자동 전환.
+// groups: [{color, v, title, empty?}]  (empty=유휴 빈 칸)
+function dotMatrix(groups, opts){
+  opts = opts||{};
+  const sm = opts.sm?" sm":"", unit = opts.unit||"";
+  let total = 0; groups.forEach(g=>{ total += (g.v||0); });
+  if(total<=0) return "";
+  const k = total>DOT_MAX ? Math.ceil(total/DOT_MAX) : 1;
+  // 와플(k>1): 칸 수를 target(≈DOT_MAX 이하)으로 제한하고 비율대로 최대잉여법 배분.
+  // (그룹마다 최소 1칸 강제하지 않음 — 작은 그룹이 벽을 만들거나 비중을 부풀리지 않게.)
+  let counts;
+  if(k===1){
+    counts = groups.map(g=>(g.v||0));
+  } else {
+    const target = Math.round(total/k);
+    const raw = groups.map(g=>(g.v||0)/total*target);
+    counts = raw.map(x=>Math.floor(x));
+    let rem = target - counts.reduce((a,b)=>a+b,0);
+    const order = raw.map((x,i)=>({i, frac:x-Math.floor(x)})).sort((a,b)=>b.frac-a.frac);
+    for(let j=0; j<order.length && rem>0; j++){ counts[order[j].i]++; rem--; }
+  }
+  let cells="";
+  groups.forEach((g,gi)=>{
+    const extra = g.cls ? (" "+g.cls) : "";
+    for(let i=0;i<counts[gi];i++){
+      cells += '<i class="dm'+sm+(g.empty?" empty":"")+extra+'" title="'+esc(g.title||"")+'"'
+        + (g.empty?"":' style="background:'+g.color+'"')+'></i>';
+    }
+  });
+  return '<div class="dmwrap">'+cells+'</div>'
+    + (k>1 ? '<div class="dmnote">1칸 ≈ '+k+esc(unit)+'</div>' : "");
+}
+
+// ---- Canvas 헬퍼 (외부 의존성 없음) ----
+function _setup(id,w,h){
+  const cv=document.getElementById(id); if(!cv) return null;
+  const d=window.devicePixelRatio||1;
+  cv.style.width=w+"px"; cv.style.height=h+"px";
+  cv.width=Math.round(w*d); cv.height=Math.round(h*d);
+  const ctx=cv.getContext("2d"); ctx.scale(d,d); return ctx;
+}
+function _arc(ctx,cx,cy,r,start,span,segs,total,gap){
+  let s=start;
+  segs.forEach(g=>{ const a=total?(g.v/total*span):0;
+    // gap 을 세그먼트 크기에 맞춰 축소 — 작은 조각이 통째로 사라지지 않게(범례와 불일치 방지).
+    if(a>0){ const gp=Math.min(gap, a*0.35);
+      ctx.beginPath(); ctx.arc(cx,cy,r,s+gp,s+a-gp);
+      ctx.strokeStyle=g.color; ctx.stroke(); } s+=a; });
+}
+function _center(ctx,cx,cy,big,small,bigPx){
+  ctx.textAlign="center"; ctx.textBaseline="middle";
+  ctx.fillStyle=COL.text; ctx.font="650 "+bigPx+"px "+MONO; ctx.fillText(big,cx,cy-5);
+  ctx.fillStyle=COL.muted; ctx.font="600 10px "+MONO; ctx.fillText(small,cx,cy+14);
+}
+function drawDonut(id,segs,total,big,small,sz){
+  sz=sz||126; const ctx=_setup(id,sz,sz); if(!ctx) return;
+  const cx=sz/2,cy=sz/2,th=Math.round(sz*0.18),r=sz/2-3-th/2;
+  ctx.lineWidth=th; ctx.lineCap="butt";
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.strokeStyle=COL.track; ctx.stroke();
+  _arc(ctx,cx,cy,r,-Math.PI/2,Math.PI*2,segs,total,0.03);
+  _center(ctx,cx,cy,big,small,Math.round(sz*0.25));
+}
+
 function nodeCard(nd){
   const cap=nd.capacity||0, alloc=nd.allocated||0;
   const free = nd.free!=null? nd.free : Math.max((nd.allocatable||cap)-alloc,0);
   const full = cap>0 && free===0;
   const cls = "node"+(full?" full":"")+(nd.ready===false?" notready":"");
 
-  // 할당 세그먼트 바: allocation 하나당 한 조각 + free 조각
-  let bar="";
-  (nd.allocations||[]).forEach(a=>{
-    const w = cap? ((a.gpu||0)/cap*100):0;
-    bar += '<i title="'+esc(a.workload)+' ('+esc(a.workload_type)+') · '+n(a.gpu)
-        +' GPU" style="width:'+w+'%;background:'+typeColor(a.workload_type)+'"></i>';
-  });
-  if(free>0 && cap){ bar += '<i style="width:'+(free/cap*100)+'%;background:transparent"></i>'; }
+  // 물리 GPU 도트 매트릭스: 셀 1개 = 물리 1장. 색 = 점유 워크로드, 빈칸 = 유휴,
+  // 분할(공유/MIG)로 빠진 장은 모드색 + parent 링(아래 풀로 펼쳐진 부모).
+  const pmode = nodePartMode(nd);
+  const dmGroups = [];
+  (nd.allocations||[]).forEach(a=>dmGroups.push({color:typeColor(a.workload_type),
+    v:a.gpu||0, title:(a.workload||"")+" ("+(a.workload_type||"")+") · "+n(a.gpu)+"GPU"}));
+  if(free>0) dmGroups.push({empty:true, v:free, title:"유휴 "+n(free)});
+  if((nd.shared_backing||0)>0) dmGroups.push({color:(MODE_COLOR[pmode]||COL.slice),
+    cls:"parent "+(MODE_CELL[pmode]||"ts"), v:nd.shared_backing,
+    title:(MODE_LABEL[pmode]||"분할")+" 전환 "+n(nd.shared_backing)+"장 → 아래 풀"});
+  const dm = dotMatrix(dmGroups, {unit:"장"});
 
   let allocs;
   if((nd.allocations||[]).length){
@@ -267,18 +467,86 @@ function nodeCard(nd){
   }
 
   const freeCls = free===0? "free none":"free";
+  const pools = nd.shared_pools||[];
+  const hasShared = pools.length>0 || (nd.shared_backing||0)>0;
+  const hasMig = pools.some(p=>modeOf(p.mode)==="mig");
+  const phys = nd.physical!=null? nd.physical : cap;
+  const recon = hasShared
+    ? '<div class="nrecon">'
+      +'<span title="이 노드의 물리 GPU 하드웨어 장수">물리 <b>'+n(phys)+'</b></span>'
+      +'<span title="분할되지 않은 통짜 GPU — 1장=1개로 스케줄되는 단위 (할당/유휴는 이 기준)">온전 <b>'+n(cap)+'</b></span>'
+      +(nd.shared_backing? '<span class="slice" title="타임슬라이스/MIG 로 쪼개 아래 공유 풀로 돌린 물리 GPU 장수">분할 <b>'+n(nd.shared_backing)+'</b>장</span>':'')
+      +(nd.sharing_strategy? '<span>'+esc(nd.sharing_strategy)+'</span>':'')
+      +(hasMig? '<span>MIG '+esc(nd.mig_strategy||"mixed")+'</span>':'')
+      +'</div>'
+    : '';
   return '<div class="'+cls+'">'
     +'<div class="nhead">'
       +'<span class="nname">'+esc(nd.name)+'</span>'
       +'<span class="prodchip">'+esc(nd.product||"GPU")+'</span>'
+      +(full?'<span class="fullbadge" title="온전 GPU 유휴 0 — 통짜 스케줄 여유 없음">FULL</span>':'')
       +(nd.ready===false?'<span class="notready-tag" style="font-size:11px">NotReady</span>':'')
       +'<span class="nspacer"></span>'
       +'<span class="nstat">할당 <b>'+n(alloc)+'</b>/'+n(cap)
         +' · 유휴 <b class="'+freeCls+'">'+n(free)+'</b></span>'
     +'</div>'
-    +'<div class="allocbar">'+bar+'</div>'
+    +recon
+    +dm
     +allocs
+    +sharedBlock(nd)
     +'</div>';
+}
+
+// 파티션 풀 도트 매트릭스: 셀 1개 = 1슬롯/인스턴스. 점유 셀은 모드 테두리(MIG 실선=격리, TS/MPS 점선).
+function poolDots(p, free){
+  const cell = MODE_CELL[modeOf(p.mode)] || "ts";
+  const unit = modeOf(p.mode)==="mig" ? "인스턴스" : "슬롯";
+  const g = [];
+  (p.allocations||[]).forEach(a=>g.push({color:typeColor(a.workload_type), cls:cell,
+    v:a.slots||0, title:(a.workload||"")+" · "+n(a.slots)+unit}));
+  if(free>0) g.push({empty:true, v:free, title:"유휴 "+n(free)});
+  return dotMatrix(g, {unit:unit, sm:true});
+}
+
+// 파티션(공유·MIG) 풀 섹션 — 온전 GPU 와 단위가 다른 '슬롯/인스턴스'.
+function sharedBlock(nd){
+  const pools = nd.shared_pools||[];
+  if(!pools.length) return "";
+  const hasMig = pools.some(p=>modeOf(p.mode)==="mig");
+  let html = '<div class="shared"><div class="shared-hd">파티션 풀'
+    +(nd.sharing_strategy? '<span class="tsbadge">'+esc(nd.sharing_strategy)+'</span>':'')
+    +(hasMig? '<span class="tsbadge mig">MIG '+esc(nd.mig_strategy||"mixed")+'</span>':'')
+    +(nd.replicas? '<span>· '+n(nd.replicas)+' 슬롯/장</span>':'')+'</div>';
+  pools.forEach(p=>{
+    const cap=p.capacity||0, al=p.allocated||0;
+    const free = p.free!=null? p.free : Math.max(cap-al,0);
+    const freeCls = free===0? "free none":"free";
+    const m = modeOf(p.mode), unit = m==="mig"?"인스턴스":"슬롯";
+    html += '<div class="pool">'
+      +'<div class="pool-hd">'
+      +'<span class="parrow">└→</span>'
+      +'<span class="pbadge b-'+(MODE_CELL[m]||"ts")+'">'+(MODE_LABEL[m]||"공유")+'</span>'
+      +'<span class="poolname">'+esc(p.profile||p.resource)+'</span>'
+      +'<span class="nspacer"></span>'
+      +'<span class="poolstat">'+unit+' <b>'+n(al)+'</b>/'+n(cap)
+        +' · 유휴 <b class="'+freeCls+'">'+n(free)+'</b></span></div>'
+      + poolDots(p, free);
+    if((p.allocations||[]).length){
+      html += '<div class="allocs">'+p.allocations.map(a=>
+        '<div class="alloc">'
+        +'<span class="g">'+n(a.slots)+'</span>'
+        +'<span class="wtype '+typeClass(a.workload_type)+'">'+esc(a.workload_type)+'</span>'
+        +'<span class="w">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
+        +'<span class="aspacer"></span>'
+        +'<span class="ns">'+esc(a.namespace)+'</span>'
+        +'</div>').join("")+'</div>';
+    } else {
+      html += '<div class="idle">할당된 슬롯 없음 (전부 유휴)</div>';
+    }
+    html += '</div>';
+  });
+  html += '</div>';
+  return html;
 }
 
 async function tick(){

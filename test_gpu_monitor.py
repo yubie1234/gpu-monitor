@@ -9,6 +9,7 @@ import unittest
 
 from app.services.gpu import (
     node_gpu, node_ready, pod_gpu, pod_ready, short_gpu_product,
+    pod_gpu_resources, is_gpu_resource, shared_profile, classify_gpu_resource,
 )
 from app.services.workload import classify_workload
 from app.services.collect import collect_allocations, collect_gpu_nodes
@@ -32,27 +33,48 @@ class FakeClient:
         return False, None, "HTTP 404 not found: %s" % path
 
 
-def _node(name, product, cap, alloc=None):
+def _node(name, product, cap, alloc=None, shared=None, physical=None,
+          replicas=None, sharing=None, mig=None):
+    """shared: {resource: qty} 파티션 풀 capacity/allocatable. physical/replicas/sharing/mig 은 라벨."""
+    labels = {}
+    if product:
+        labels["nvidia.com/gpu.product"] = product
+    if physical is not None:
+        labels["nvidia.com/gpu.count"] = str(physical)
+    if replicas is not None:
+        labels["nvidia.com/gpu.replicas"] = str(replicas)
+    if sharing is not None:
+        labels["nvidia.com/gpu.sharing-strategy"] = sharing
+    if mig is not None:
+        labels["nvidia.com/mig.strategy"] = mig
+    capacity = {"nvidia.com/gpu": str(cap)}
+    allocatable = {"nvidia.com/gpu": str(alloc if alloc is not None else cap)}
+    for res, qty in (shared or {}).items():
+        capacity[res] = str(qty)
+        allocatable[res] = str(qty)
     return {
-        "metadata": {"name": name,
-                     "labels": {"nvidia.com/gpu.product": product} if product else {}},
+        "metadata": {"name": name, "labels": labels},
         "status": {
-            "capacity": {"nvidia.com/gpu": str(cap)},
-            "allocatable": {"nvidia.com/gpu": str(alloc if alloc is not None else cap)},
+            "capacity": capacity,
+            "allocatable": allocatable,
             "conditions": [{"type": "Ready", "status": "True"}],
         },
     }
 
 
 def _pod(name, ns, gpu, node="gpu-node-01", labels=None, owner=None, phase="Running",
-         ready=True):
+         ready=True, shared=None):
+    """shared: {resource: qty} 공유 슬롯 점유."""
     meta = {"name": name, "namespace": ns, "labels": labels or {}}
     if owner:
         meta["ownerReferences"] = [dict(owner, controller=True)]
+    limits = {"nvidia.com/gpu": str(gpu)}
+    for res, qty in (shared or {}).items():
+        limits[res] = str(qty)
     return {
         "metadata": meta,
         "spec": {"nodeName": node,
-                 "containers": [{"resources": {"limits": {"nvidia.com/gpu": str(gpu)}}}]},
+                 "containers": [{"resources": {"limits": limits}}]},
         "status": {"phase": phase,
                    "conditions": [{"type": "Ready",
                                    "status": "True" if ready else "False"}]},
@@ -86,6 +108,78 @@ class TestGpuPrimitives(unittest.TestCase):
         self.assertEqual(g["capacity"], 8)
         self.assertEqual(g["allocatable"], 8)
         self.assertEqual(g["product"], "H100")
+        self.assertEqual(g["shared_pools"], [])
+        self.assertIsNone(g["physical"])
+
+    def test_is_gpu_resource_and_profile(self):
+        self.assertTrue(is_gpu_resource("nvidia.com/gpu"))
+        self.assertTrue(is_gpu_resource("nvidia.com/gpu.10gb"))
+        self.assertTrue(is_gpu_resource("nvidia.com/gpu.full-mps"))
+        self.assertTrue(is_gpu_resource("nvidia.com/mig-1g.10gb"))   # MIG
+        self.assertFalse(is_gpu_resource("cpu"))
+        self.assertFalse(is_gpu_resource("amd.com/gpu"))
+        self.assertEqual(shared_profile("nvidia.com/gpu.10gb"), "10gb")
+        self.assertEqual(shared_profile("nvidia.com/mig-1g.10gb"), "1g.10gb")
+
+    def test_classify_gpu_resource(self):
+        self.assertEqual(classify_gpu_resource("nvidia.com/gpu"),
+                         {"mode": "whole", "profile": None})
+        self.assertEqual(classify_gpu_resource("nvidia.com/mig-1g.10gb"),
+                         {"mode": "mig", "profile": "1g.10gb"})
+        self.assertEqual(classify_gpu_resource("nvidia.com/gpu.10gb-mps"),
+                         {"mode": "mps", "profile": "10gb"})
+        self.assertEqual(classify_gpu_resource("nvidia.com/gpu.10gb-ts"),
+                         {"mode": "timeslice", "profile": "10gb"})
+        # 접미사 없음 -> sharing-strategy 기본(time-slicing)
+        self.assertEqual(classify_gpu_resource("nvidia.com/gpu.10gb", "time-slicing"),
+                         {"mode": "timeslice", "profile": "10gb"})
+        self.assertEqual(classify_gpu_resource("nvidia.com/gpu.full", "mps"),
+                         {"mode": "mps", "profile": "full"})
+
+    def test_pod_gpu_resources_whole_and_shared(self):
+        # 온전 + 공유가 섞이면 키별로 따로 집계(합치지 않음).
+        pod = _pod("p", "ns", 2, shared={"nvidia.com/gpu.10gb": 3})
+        self.assertEqual(pod_gpu_resources(pod),
+                         {"nvidia.com/gpu": 2, "nvidia.com/gpu.10gb": 3})
+        self.assertEqual(pod_gpu(pod), 2)  # pod_gpu 는 온전만
+
+    def test_pod_gpu_resources_shared_only(self):
+        pod = _pod("p", "ns", 0, shared={"nvidia.com/gpu.10gb": 4})
+        self.assertEqual(pod_gpu_resources(pod), {"nvidia.com/gpu.10gb": 4})
+        self.assertEqual(pod_gpu(pod), 0)
+
+    def test_node_gpu_shared_pools_and_physical(self):
+        # 실환경 재현: 물리 8, 온전 7, .10gb 8슬롯(replicas 8), time-slicing.
+        node = _node("h100", "NVIDIA-H100-80GB-HBM3", 7, 7,
+                     shared={"nvidia.com/gpu.10gb": 8}, physical=8,
+                     replicas=8, sharing="time-slicing")
+        g = node_gpu(node)
+        self.assertEqual(g["capacity"], 7)
+        self.assertEqual(g["physical"], 8)
+        self.assertEqual(g["replicas"], 8)
+        self.assertEqual(g["sharing_strategy"], "time-slicing")
+        self.assertEqual(len(g["shared_pools"]), 1)
+        pool = g["shared_pools"][0]
+        self.assertEqual(pool["resource"], "nvidia.com/gpu.10gb")
+        self.assertEqual(pool["profile"], "10gb")
+        self.assertEqual(pool["mode"], "timeslice")
+        self.assertEqual(pool["capacity"], 8)
+        self.assertEqual(pool["allocatable"], 8)
+
+    def test_node_gpu_mig(self):
+        # MIG mixed: 물리 4, 온전 3, mig-1g.10gb 7인스턴스.
+        node = _node("mig", "NVIDIA-A100-SXM4-80GB", 3, 3,
+                     shared={"nvidia.com/mig-1g.10gb": 7}, physical=4, mig="mixed")
+        g = node_gpu(node)
+        self.assertEqual(g["capacity"], 3)
+        self.assertEqual(g["physical"], 4)
+        self.assertEqual(g["mig_strategy"], "mixed")
+        self.assertEqual(len(g["shared_pools"]), 1)
+        pool = g["shared_pools"][0]
+        self.assertEqual(pool["resource"], "nvidia.com/mig-1g.10gb")
+        self.assertEqual(pool["profile"], "1g.10gb")
+        self.assertEqual(pool["mode"], "mig")
+        self.assertEqual(pool["capacity"], 7)
 
     def test_pod_ready(self):
         self.assertTrue(pod_ready(_pod("p", "ns", 1, ready=True)))
@@ -171,6 +265,104 @@ class TestCollect(unittest.TestCase):
         collect_allocations(client, node)
         self.assertIn("pods:", node["error"] or "")
 
+    def test_collect_gpu_nodes_physical_and_backing(self):
+        # 물리 8, 온전 7, .10gb 8슬롯 -> shared_backing = 8-7 = 1.
+        client = FakeClient({"/api/v1/nodes": {"items": [
+            _node("h100", "NVIDIA-H100-80GB-HBM3", 7, 7,
+                  shared={"nvidia.com/gpu.10gb": 8}, physical=8,
+                  replicas=8, sharing="time-slicing")]}})
+        nodes, errs = collect_gpu_nodes(client, {})
+        self.assertEqual(errs, [])
+        n = nodes[0]
+        self.assertEqual(n["capacity"], 7)
+        self.assertEqual(n["physical"], 8)
+        self.assertEqual(n["shared_backing"], 1)
+        self.assertEqual(n["replicas"], 8)
+        self.assertEqual(n["sharing_strategy"], "time-slicing")
+        self.assertEqual(len(n["shared_pools"]), 1)
+        self.assertEqual(n["shared_pools"][0]["capacity"], 8)
+        self.assertEqual(n["shared_pools"][0]["allocations"], [])
+
+    def test_collect_gpu_nodes_shared_only_node_kept(self):
+        # 온전 nvidia.com/gpu 가 0 이라도 공유 풀/gpu.count 있으면 GPU 노드로 유지.
+        client = FakeClient({"/api/v1/nodes": {"items": [
+            _node("sliced", "NVIDIA-H100-80GB-HBM3", 0, 0,
+                  shared={"nvidia.com/gpu.10gb": 64}, physical=8, replicas=8)]}})
+        nodes, errs = collect_gpu_nodes(client, {})
+        self.assertEqual([n["name"] for n in nodes], ["sliced"])
+        self.assertEqual(nodes[0]["capacity"], 0)
+        self.assertEqual(nodes[0]["shared_backing"], 8)  # 8 - 0
+
+    def test_collect_allocations_splits_whole_and_shared(self):
+        pods = {"items": [
+            _pod("qwen-predictor-0", "kserve", 2,
+                 labels={"serving.kserve.io/inferenceservice": "qwen"}),   # 온전 2
+            _pod("nb-0", "team-ml", 0, shared={"nvidia.com/gpu.10gb": 2},
+                 labels={"notebook-name": "jhwang"}),                      # 슬롯 2
+            _pod("batch-x", "team-ml", 0, shared={"nvidia.com/gpu.10gb": 1},
+                 owner={"kind": "Job", "name": "batch"}, ready=False),     # 슬롯 1
+            _pod("done", "ml", 0, shared={"nvidia.com/gpu.10gb": 4},
+                 phase="Succeeded"),                                       # 종료 -> 제외
+        ]}
+        client = FakeClient({"spec.nodeName=h100": pods})
+        node = {"name": "h100", "capacity": 7, "allocatable": 7, "allocated": 0,
+                "free": None, "allocations": [], "error": None,
+                "shared_pools": [{"resource": "nvidia.com/gpu.10gb", "profile": "10gb",
+                                  "capacity": 8, "allocatable": 8, "allocated": 0,
+                                  "free": None, "allocations": []}]}
+        collect_allocations(client, node)
+        # 온전 풀
+        self.assertEqual(node["allocated"], 2)
+        self.assertEqual(node["free"], 5)
+        self.assertEqual(len(node["allocations"]), 1)
+        self.assertEqual(node["allocations"][0]["workload_type"], "KServe")
+        # 공유 풀
+        pool = node["shared_pools"][0]
+        self.assertEqual(pool["allocated"], 3)   # 2 + 1 (종료 Pod 제외)
+        self.assertEqual(pool["free"], 5)         # 8 - 3
+        self.assertEqual(len(pool["allocations"]), 2)
+        self.assertEqual(pool["allocations"][0]["slots"], 2)  # 큰 순 정렬
+
+    def test_collect_allocations_creates_missing_pool(self):
+        # capacity 엔 없던 공유 리소스를 Pod 이 점유 -> 풀 방어적 생성.
+        pods = {"items": [_pod("p", "ns", 0, shared={"nvidia.com/gpu.20gb": 2})]}
+        client = FakeClient({"spec.nodeName=h100": pods})
+        node = {"name": "h100", "capacity": 7, "allocatable": 7, "allocated": 0,
+                "free": None, "allocations": [], "error": None, "shared_pools": []}
+        collect_allocations(client, node)
+        self.assertEqual(len(node["shared_pools"]), 1)
+        self.assertEqual(node["shared_pools"][0]["resource"], "nvidia.com/gpu.20gb")
+        self.assertEqual(node["shared_pools"][0]["allocated"], 2)
+
+    def test_collect_gpu_nodes_mig(self):
+        client = FakeClient({"/api/v1/nodes": {"items": [
+            _node("mig", "NVIDIA-A100-SXM4-80GB", 3, 3,
+                  shared={"nvidia.com/mig-1g.10gb": 7}, physical=4, mig="mixed")]}})
+        nodes, errs = collect_gpu_nodes(client, {})
+        n = nodes[0]
+        self.assertEqual(n["mig_strategy"], "mixed")
+        self.assertEqual(n["shared_backing"], 1)   # 물리 4 - 온전 3
+        self.assertEqual(n["shared_pools"][0]["mode"], "mig")
+
+    def test_collect_allocations_mig_instances(self):
+        pods = {"items": [
+            _pod("bert-0", "kserve", 0, shared={"nvidia.com/mig-1g.10gb": 3},
+                 labels={"serving.kserve.io/inferenceservice": "bert"}),
+            _pod("vllm-0", "default", 2, node="mig"),   # 온전 2
+        ]}
+        client = FakeClient({"spec.nodeName=mig": pods})
+        node = {"name": "mig", "capacity": 3, "allocatable": 3, "allocated": 0,
+                "free": None, "allocations": [], "error": None,
+                "shared_pools": [{"resource": "nvidia.com/mig-1g.10gb", "profile": "1g.10gb",
+                                  "mode": "mig", "capacity": 7, "allocatable": 7,
+                                  "allocated": 0, "free": None, "allocations": []}]}
+        collect_allocations(client, node)
+        self.assertEqual(node["allocated"], 2)          # 온전
+        pool = node["shared_pools"][0]
+        self.assertEqual(pool["allocated"], 3)          # MIG 인스턴스
+        self.assertEqual(pool["free"], 4)               # 7 - 3
+        self.assertEqual(pool["mode"], "mig")
+
 
 class TestSummarize(unittest.TestCase):
     def _snap(self):
@@ -200,8 +392,65 @@ class TestSummarize(unittest.TestCase):
 
     def test_products(self):
         s = summarize(self._snap())
-        self.assertEqual(s["products"]["H100"], {"capacity": 16, "allocated": 11, "free": 5})
+        # physical 라벨 없는 노드는 capacity 로 폴백 -> physical == capacity.
+        self.assertEqual(s["products"]["H100"],
+                         {"capacity": 16, "allocated": 11, "free": 5, "physical": 16})
         self.assertEqual(s["products"]["B200"]["capacity"], 8)
+
+    def test_gpu_physical_falls_back_to_capacity(self):
+        # physical 필드 없는 노드 -> gpu_physical == gpu_capacity.
+        s = summarize(self._snap())
+        self.assertEqual(s["gpu_physical"], s["gpu_capacity"])
+        self.assertEqual(s["gpu_shared_backing"], 0)
+        self.assertEqual(s["shared"], {"capacity": 0, "allocated": 0, "free": 0,
+                                       "by_profile": {}, "by_mode": {}, "pools": {}})
+
+    def test_shared_and_physical_aggregation(self):
+        snap = {"nodes": [
+            {"name": "h100", "product": "H100", "capacity": 7, "allocatable": 7,
+             "allocated": 7, "free": 0, "physical": 8, "shared_backing": 1,
+             "allocations": [{"workload_type": "KServe", "gpu": 7,
+                              "namespace": "kserve", "ready": True}],
+             "shared_pools": [{"resource": "nvidia.com/gpu.10gb", "profile": "10gb",
+                               "capacity": 8, "allocatable": 8, "allocated": 3,
+                               "free": 5, "allocations": []}]},
+            {"name": "b200", "product": "B200", "capacity": 8, "allocatable": 8,
+             "allocated": 6, "free": 2, "physical": 8, "shared_backing": 0,
+             "allocations": [], "shared_pools": []},
+        ]}
+        s = summarize(snap)
+        self.assertEqual(s["gpu_capacity"], 15)     # 온전 7 + 8
+        self.assertEqual(s["gpu_physical"], 16)     # 물리 8 + 8
+        self.assertEqual(s["gpu_shared_backing"], 1)
+        self.assertEqual(s["shared"]["capacity"], 8)
+        self.assertEqual(s["shared"]["allocated"], 3)
+        self.assertEqual(s["shared"]["free"], 5)
+        self.assertEqual(s["shared"]["by_profile"]["10gb"],
+                         {"capacity": 8, "allocated": 3, "free": 5})
+        # 공유 슬롯은 by_workload_type(온전 기준)에 섞이지 않는다.
+        self.assertEqual(s["by_workload_type"], {"KServe": 7})
+
+    def test_shared_by_mode(self):
+        snap = {"nodes": [
+            {"name": "a", "product": "H100", "capacity": 7, "allocated": 7, "free": 0,
+             "physical": 8, "shared_backing": 1, "allocations": [],
+             "shared_pools": [{"profile": "10gb", "mode": "timeslice", "capacity": 8,
+                               "allocatable": 8, "allocated": 3, "free": 5}]},
+            {"name": "b", "product": "A100", "capacity": 3, "allocated": 2, "free": 1,
+             "physical": 4, "shared_backing": 1, "allocations": [],
+             "shared_pools": [{"profile": "1g.10gb", "mode": "mig", "capacity": 7,
+                               "allocatable": 7, "allocated": 5, "free": 2}]},
+        ]}
+        s = summarize(snap)
+        self.assertEqual(s["shared"]["capacity"], 15)
+        self.assertEqual(s["shared"]["by_mode"]["timeslice"],
+                         {"capacity": 8, "allocated": 3, "free": 5})
+        self.assertEqual(s["shared"]["by_mode"]["mig"],
+                         {"capacity": 7, "allocated": 5, "free": 2})
+        # pools: 리소스별(여기선 profile 폴백) mode/profile 포함 — '분할이 무엇인지' 표시용
+        self.assertEqual(s["shared"]["pools"]["1g.10gb"]["mode"], "mig")
+        self.assertEqual(s["shared"]["pools"]["1g.10gb"]["allocated"], 5)
+        self.assertEqual(s["shared"]["pools"]["10gb"]["mode"], "timeslice")
 
     def test_by_workload_type(self):
         s = summarize(self._snap())
@@ -295,7 +544,9 @@ class TestPrometheus(unittest.TestCase):
 
     def test_render_metric_families_grouped(self):
         # text format 0.0.4: 같은 계열의 샘플은 한 그룹으로 이어져야 한다.
-        text = render_prometheus_metrics(self._snap())
+        self._assert_grouped(render_prometheus_metrics(self._snap()))
+
+    def _assert_grouped(self, text):
         groups, seen = [], set()
         for line in text.splitlines():
             if not line or line.startswith("#"):
@@ -305,6 +556,55 @@ class TestPrometheus(unittest.TestCase):
                 self.assertNotIn(name, seen, "계열 %s 가 두 그룹으로 갈라짐" % name)
                 seen.add(name)
                 groups.append(name)
+
+    def _shared_snap(self):
+        return {
+            "summary": {"gpu_capacity": 15, "gpu_allocated": 13, "gpu_free": 2,
+                        "gpu_physical": 16, "gpu_shared_backing": 1, "node_count": 2,
+                        "by_workload_type": {"KServe": 13},
+                        "by_namespace": {"default": 13},
+                        "by_ready": {"true": 13, "false": 0},
+                        "shared": {"capacity": 8, "allocated": 3, "free": 5,
+                                   "by_profile": {"10gb": {"capacity": 8, "allocated": 3,
+                                                           "free": 5}}}},
+            "nodes": [
+                {"name": "h100", "product": "H100",
+                 "product_raw": "NVIDIA-H100-80GB-HBM3", "ready": True,
+                 "capacity": 7, "allocatable": 7, "allocated": 7, "free": 0,
+                 "physical": 8, "shared_backing": 1, "error": None,
+                 "shared_pools": [{"resource": "nvidia.com/gpu.10gb", "profile": "10gb",
+                                   "mode": "timeslice",
+                                   "capacity": 8, "allocatable": 8, "allocated": 3,
+                                   "free": 5, "allocations": []}]},
+                {"name": "b200", "product": "B200", "product_raw": "NVIDIA-B200",
+                 "ready": True, "capacity": 8, "allocatable": 8, "allocated": 6,
+                 "free": 2, "physical": 8, "shared_backing": 0, "error": None,
+                 "shared_pools": []},
+            ],
+            "k8s_enabled": True, "errors": [],
+        }
+
+    def test_render_shared_families(self):
+        text = render_prometheus_metrics(self._shared_snap())
+        self.assertIn("gpu_monitor_cluster_gpu_physical 16", text)
+        self.assertIn('gpu_monitor_cluster_shared_slots{state="capacity"} 8', text)
+        self.assertIn('gpu_monitor_cluster_shared_slots{state="allocated"} 3', text)
+        self.assertIn('gpu_monitor_cluster_shared_slots{state="free"} 5', text)
+        self.assertIn('gpu_monitor_node_physical{node="h100",product="H100"} 8', text)
+        self.assertIn('gpu_monitor_node_shared_backing{node="h100",product="H100"} 1',
+                      text)
+        self.assertIn('gpu_monitor_node_shared_backing{node="b200",product="B200"} 0',
+                      text)
+        self.assertIn('gpu_monitor_node_shared{node="h100",product="H100",'
+                      'resource="nvidia.com/gpu.10gb",mode="timeslice",state="allocated"} 3', text)
+        self.assertIn('gpu_monitor_node_shared{node="h100",product="H100",'
+                      'resource="nvidia.com/gpu.10gb",mode="timeslice",state="free"} 5', text)
+        # 기존 온전 GPU 계열은 그대로(값 불변) — Grafana 하위호환.
+        self.assertIn("gpu_monitor_cluster_gpu_capacity 15", text)
+
+    def test_render_shared_families_grouped(self):
+        # 신규 계열이 끼어들어도 text format 그룹핑이 깨지지 않아야 한다.
+        self._assert_grouped(render_prometheus_metrics(self._shared_snap()))
 
 
 class TestObservability(unittest.TestCase):
