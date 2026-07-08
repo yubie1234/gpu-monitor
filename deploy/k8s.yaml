@@ -63,7 +63,7 @@ metadata:
   labels:
     app: gpu-monitor
     app.kubernetes.io/name: gpu-monitor
-    app.kubernetes.io/version: "0.2.0"   # app/__init__.py __version__ 과 맞출 것
+    app.kubernetes.io/version: "0.3.1"   # app/__init__.py __version__ 과 맞출 것
 spec:
   # replicas:1 — 모니터라 단일 인스턴스 수용(HA 아님). 노드 드레인/축출 시 재스케줄 +
   # startupProbe 첫 수집(최대 300s) 동안 대시보드/metrics 공백. PDB 는 replicas:1 에선 무의미해 생략.
@@ -75,7 +75,7 @@ spec:
       labels:
         app: gpu-monitor
         app.kubernetes.io/name: gpu-monitor
-        app.kubernetes.io/version: "0.2.0"
+        app.kubernetes.io/version: "0.3.1"
     spec:
       serviceAccountName: gpu-monitor
       containers:
