@@ -557,6 +557,42 @@ class TestSummarize(unittest.TestCase):
         self.assertEqual(s["by_ready"], {"true": 0, "false": 0})
         self.assertEqual(s["by_namespace"], {})
 
+    def test_errored_node_not_counted_as_free(self):
+        # Pod 수집 실패 노드는 할당/유휴가 미상 — capacity 를 free 로 착시하면
+        # 관리자가 배치 가능하다고 오판한다. gpu_unknown 으로 격리한다.
+        snap = {"nodes": [
+            {"name": "ok", "product": "H100", "capacity": 8, "allocatable": 8,
+             "allocated": 8, "free": 0, "allocations": [
+                 {"workload_type": "KServe", "gpu": 8, "namespace": "k",
+                  "ready": True}]},
+            {"name": "err", "product": "H100", "capacity": 8, "allocatable": 8,
+             "allocated": 0, "free": None, "error": "pods: HTTP 403",
+             "allocations": []},
+        ]}
+        s = summarize(snap)
+        self.assertEqual(s["gpu_capacity"], 16)   # capacity 는 노드 status 라 확정
+        self.assertEqual(s["gpu_physical"], 16)
+        self.assertEqual(s["gpu_allocated"], 8)   # 실패 노드 alloc 은 미상 -> 미집계
+        self.assertEqual(s["gpu_free"], 0)        # 실패 노드 capacity 가 free 로 새지 않음
+        self.assertEqual(s["gpu_unknown"], 8)     # 대신 미상으로 격리
+        # 정상 노드가 없으면 gpu_unknown 이 없다(회귀 가드).
+        self.assertEqual(summarize({"nodes": []})["gpu_unknown"], 0)
+
+    def test_errored_node_shared_pool_free_not_inflated(self):
+        # 온전 GPU 와 동일하게, 실패 노드의 공유 풀 슬롯도 free 로 착시되면 안 된다.
+        snap = {"nodes": [
+            {"name": "err", "product": "H100", "capacity": 0, "allocatable": 0,
+             "allocated": 0, "free": None, "error": "pods: HTTP 403",
+             "physical": 8, "shared_backing": 8, "allocations": [],
+             "shared_pools": [{"resource": "nvidia.com/gpu.10gb", "profile": "10gb",
+                               "mode": "timeslice", "capacity": 64, "allocatable": 64,
+                               "allocated": 0, "free": None, "allocations": []}]},
+        ]}
+        s = summarize(snap)
+        self.assertEqual(s["shared"]["capacity"], 64)   # capacity 는 확정
+        self.assertEqual(s["shared"]["allocated"], 0)
+        self.assertEqual(s["shared"]["free"], 0)        # 미상 -> free 로 새지 않음
+
 
 class TestPrometheus(unittest.TestCase):
     def _snap(self):
@@ -676,6 +712,14 @@ class TestPrometheus(unittest.TestCase):
     def test_render_shared_families_grouped(self):
         # 신규 계열이 끼어들어도 text format 그룹핑이 깨지지 않아야 한다.
         self._assert_grouped(render_prometheus_metrics(self._shared_snap()))
+
+    def test_render_gpu_unknown(self):
+        snap = dict(self._snap())
+        snap["summary"] = dict(snap["summary"], gpu_unknown=8)
+        text = render_prometheus_metrics(snap)
+        self.assertIn("# TYPE gpu_monitor_cluster_gpu_unknown gauge", text)
+        self.assertIn("gpu_monitor_cluster_gpu_unknown 8", text)
+        self._assert_grouped(text)
 
 
 class TestObservability(unittest.TestCase):

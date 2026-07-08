@@ -22,6 +22,11 @@
   또는 `nvidia.com/mig-<프로파일>`(MIG)을 **슬롯/인스턴스 단위로 별도** 표시. "물리 8장 중 1장이
   분할"까지 재구성 (아래 [파티션 GPU](#파티션-gpu--공유타임슬라이스mps--mig) 참고)
 - **클러스터 집계**: 총/할당/유휴 GPU, 장치별·워크로드 타입별·**사용 목적별**·**환경별** 분포
+- **노드 필터·정렬**: 대시보드에서 검색(노드/워크로드/네임스페이스)·장치 필터·정렬(이름/유휴/할당률)·
+  "유휴 노드만" 토글로 배치 가능한 노드를 빠르게 추린다(클라이언트 측, 재수집 없음)
+- **수집 실패 노드는 '미상'으로 격리**: Pod 조회에 실패한 노드(RBAC 403 등)는 할당/유휴가 미상이라
+  capacity 를 유휴로 착시시키지 않고 별도 표기 — 잘못된 여유 GPU 판단을 막는다
+- **정체(stale) 감지**: 스냅샷이 갱신되지 않으면(백그라운드 수집 지연) 상대시간과 함께 ⚠ 표시
 - Prometheus `/metrics`
 
 ## 실행
@@ -54,6 +59,7 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 | `gpu_monitor_build_info` | gauge (상수 1) | `version` | 빌드 정보 |
 | `gpu_monitor_cluster_gpu_capacity` / `_allocated` / `_free` | gauge | – | 클러스터 **온전(whole)** GPU 총/할당/유휴 (`nvidia.com/gpu`) |
 | `gpu_monitor_cluster_gpu_physical` | gauge | – | 클러스터 **물리** GPU 총수 (`nvidia.com/gpu.count` 합) — 공유로 빠진 장수 포함 |
+| `gpu_monitor_cluster_gpu_unknown` | gauge | – | Pod 조회 실패 노드의 온전 GPU — 할당/유휴가 **미상**이라 `_free` 에서 제외(유휴 착시 방지) |
 | `gpu_monitor_cluster_shared_slots` | gauge | `state` (capacity/allocated/free) | 클러스터 **공유 슬롯** — 타임슬라이스/MPS. **물리 장수 아님**(1 슬롯 ≠ 1장) |
 | `gpu_monitor_nodes` | gauge | – | GPU 노드 수 |
 | `gpu_monitor_node_gpu` | gauge | `node`, `product`, `state` | 노드별 온전 GPU — state=capacity/allocatable/allocated/free (값 `None` 이면 라인 생략) |

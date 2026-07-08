@@ -67,6 +67,21 @@
     padding:15px 16px;display:flex;flex-direction:column;gap:12px}
   .node.full{border-color:rgba(210,153,34,.4)}
   .node.notready{opacity:.7;border-style:dashed}
+  .node.err{border-color:rgba(248,81,73,.4)}
+  .errbadge{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--down);
+    background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.5);
+    border-radius:20px;padding:1px 8px;letter-spacing:.05em}
+
+  /* 노드 필터/정렬 컨트롤 바 */
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .ctl-input,.ctl-sel{font-family:var(--sans);font-size:12.5px;color:var(--text);
+    background:var(--surface);border:1px solid var(--border);border-radius:7px;
+    padding:5px 9px;line-height:1.4}
+  .ctl-input{min-width:230px;flex:0 1 280px}
+  .ctl-input::placeholder{color:var(--faint)}
+  .ctl-input:focus,.ctl-sel:focus{outline:none;border-color:var(--accent)}
+  .ctl-sel{cursor:pointer}
+  .ctl-count{font-family:var(--mono);font-size:11.5px;color:var(--faint);margin-left:auto}
   .nhead{display:flex;align-items:center;gap:9px}
   .nname{font-family:var(--mono);font-weight:650;font-size:14px}
   .prodchip{font-family:var(--mono);font-size:10.5px;font-weight:600;color:#c7a6f5;
@@ -142,6 +157,9 @@
   /* 전용 토큰 'dm-empty' — 범용 .empty(padding:26px) 규칙과 이름이 겹치면 box-sizing:border-box
      상 빈 셀이 ~54px 로 부풀어 사용중 셀의 ~4배가 된다. 슬롯 빈 칸에 'empty' 단독 토큰 금지. */
   .dm.dm-empty{background:var(--surface2);border-color:var(--border)}
+  /* 수집 실패(할당 미상) — 유휴(빈 칸)와 헷갈리지 않게 사선 해치로 구분 */
+  .dm.unknown{background:repeating-linear-gradient(45deg,#4b5568 0 3px,#2b333f 3px 6px);
+    border-color:var(--faint)}
   /* 파티션 모드 테두리: MIG 실선(격리) · TS/MPS 점선(소프트) · parent 링(부모 물리장) */
   .dm.ts{border-style:dashed}
   .dm.mps{border-style:dashed;border-color:rgba(232,147,90,.65)}
@@ -196,6 +214,18 @@
     <div class="sec-title">노드별 GPU
       <span class="src">온전 capacity / allocated / free · 공유 풀(타임슬라이스)은 슬롯 단위 별도</span>
     </div>
+    <div class="controls" id="controls">
+      <input type="search" id="q" class="ctl-input"
+             placeholder="검색 — 노드 · 워크로드 · 네임스페이스">
+      <select id="prod" class="ctl-sel" title="장치(제품)로 필터"></select>
+      <select id="sort" class="ctl-sel" title="노드 정렬 기준">
+        <option value="name">이름순</option>
+        <option value="free">유휴 많은순</option>
+        <option value="util">할당률 높은순</option>
+      </select>
+      <label class="toggle"><input type="checkbox" id="idleonly"> 유휴 노드만</label>
+      <span class="ctl-count" id="ncount"></span>
+    </div>
     <div class="nodes" id="nodes"></div>
   </section>
 
@@ -208,6 +238,13 @@ const REFRESH_MS = __INTERVAL_MS__;
 const BASE_PATH = __BASE_PATH_JS__;
 const GRAFANA_URL = __GRAFANA_URL_JS__;
 const $ = (s)=>document.querySelector(s);
+
+// --- 렌더 상태 ---
+let LAST_SNAP = null;            // 최신 스냅샷 — 컨트롤(필터/정렬) 재렌더가 재사용
+let LAST_TS = null, TS_AT = 0;   // 마지막으로 바뀐 스냅샷 ts + 그걸 관측한 클라 시각
+let CONN_OK = true;              // 마지막 fetch 성공 여부(정체 표시가 '연결 실패'를 덮지 않게)
+// 정체 임계 — 이 시간 동안 ts 가 안 바뀌면 백그라운드 수집이 지연된 것으로 본다.
+const STALE_MS = Math.max(REFRESH_MS*3, 45000);
 
 // Grafana URL(MONITOR_GRAFANA_URL)이 설정됐을 때만 딥링크 노출 — 히스토리는 Grafana 담당.
 if (GRAFANA_URL) document.getElementById("grafana-link").style.display = "";
@@ -253,7 +290,7 @@ function n(v){ return (v==null||isNaN(Number(v)))?"–":Number(v).toLocaleString
 
 // Canvas 는 CSS 변수를 못 쓰므로 팔레트를 hex 로 고정(대시보드 :root 와 동일값).
 const COL = {alloc:"#d29922", free:"#3fb950", slice:"#b083f0", accent:"#6e8bff",
-  track:"#1b222c", text:"#e6edf3", muted:"#8b97a7", down:"#f85149"};
+  track:"#1b222c", text:"#e6edf3", muted:"#8b97a7", down:"#f85149", unknown:"#5b6675"};
 const MONO = 'ui-monospace,Menlo,Consolas,monospace';
 // 도트가 벽이 되지 않게: 개수가 이보다 크면 와플(1칸=k개)로 자동 전환.
 const DOT_MAX = 48;
@@ -270,8 +307,9 @@ function nodePartMode(nd){
 }
 
 function render(snap){
+  LAST_SNAP = snap;                        // 컨트롤(필터/정렬) 재렌더가 재사용
   $("#ver").textContent = snap.version ? ("v"+snap.version) : "";
-  $("#updated").textContent = snap.ts || "—";
+  // #updated 는 updateAge() 가 소유(상대시간·정체 표시) — 여기서 건드리지 않는다.
 
   // 배너
   let banner="";
@@ -282,7 +320,10 @@ function render(snap){
 
   const s = snap.summary || {};
   const cap=s.gpu_capacity||0, alloc=s.gpu_allocated||0, free=s.gpu_free||0;
-  const pct = cap? Math.round(alloc/cap*100):0;
+  const unknown = s.gpu_unknown||0;
+  // 할당률은 '알려진' 온전 GPU(수집 실패분 제외) 기준 — 미상 노드가 비율을 희석하지 않게.
+  const known = Math.max(cap - unknown, 0);
+  const pct = known? Math.round(alloc/known*100):0;
 
   // 물리 GPU + 파티션(공유/MIG) — 온전 GPU 와 단위가 다르다.
   const physical = s.gpu_physical||0, sharedBacking = s.gpu_shared_backing||0;
@@ -301,6 +342,9 @@ function render(snap){
   const physLeg = [{color:COL.alloc,label:"할당",v:alloc},{color:COL.free,label:"유휴",v:free}];
   if(sharedBacking>0){ physSegs.push({v:sharedBacking,color:COL.slice});
     physLeg.push({color:COL.slice,label:"분할",v:sharedBacking,suffix:"장"}); }
+  // 수집 실패 노드의 온전 GPU — 유휴로 착시시키지 않게 '미상'으로 분리 표기.
+  if(unknown>0){ physSegs.push({v:unknown,color:COL.unknown});
+    physLeg.push({color:COL.unknown,label:"미상",v:unknown,suffix:"장"}); }
   draws.push(()=>drawDonut("viz-phys", physSegs, physical||1, n(physical), "물리 GPU"));
 
   // 워크로드 타입 — 도넛
@@ -354,13 +398,71 @@ function render(snap){
   $("#cards").innerHTML = cardsHtml;
   draws.forEach(fn=>{ try{ fn(); }catch(e){} });
 
-  // 노드
-  const nodes = snap.nodes || [];
-  if(!nodes.length){
-    $("#nodes").innerHTML = '<div class="empty">GPU 노드 없음 (또는 아직 수집 전)</div>';
-    return;
+  renderNodes();   // 노드 그리드는 필터/정렬 컨트롤을 반영해 별도로 그린다
+}
+
+// 노드 유휴(온전) 수 — 수집 실패 노드는 미상이라 0 취급(정렬·필터 안전).
+function nodeFreeCount(nd){
+  if(nd.error) return 0;
+  const cap=nd.capacity||0, alloc=nd.allocated||0;
+  return nd.free!=null? nd.free : Math.max((nd.allocatable||cap)-alloc,0);
+}
+
+// 검색어 매칭 — 노드명/제품 + 온전·공유 allocation 의 워크로드/네임스페이스/pod.
+function nodeMatches(nd, q){
+  if(!q) return true;
+  const hay = [nd.name, nd.product, nd.product_raw];
+  (nd.allocations||[]).forEach(a=>hay.push(a.workload, a.namespace, a.pod));
+  (nd.shared_pools||[]).forEach(p=>(p.allocations||[]).forEach(
+    a=>hay.push(a.workload, a.namespace, a.pod)));
+  return hay.some(x=>String(x==null?"":x).toLowerCase().includes(q));
+}
+
+// 장치 필터 <select> 를 스냅샷 제품 목록으로 채운다(현재 선택은 가능한 한 보존).
+function fillProducts(nodes){
+  const sel = $("#prod"); if(!sel) return;
+  const cur = sel.value;
+  const prods = Array.from(new Set(nodes.map(nd=>nd.product||"GPU"))).sort();
+  sel.innerHTML = ['<option value="">전체 장치</option>'].concat(
+    prods.map(p=>'<option value="'+esc(p)+'">'+esc(p)+'</option>')).join("");
+  if(cur && prods.indexOf(cur)>=0) sel.value = cur;
+}
+
+// 컨트롤(검색/제품/정렬/유휴만)을 적용해 노드 그리드만 다시 그린다 — 재fetch 없음.
+function renderNodes(){
+  const snap = LAST_SNAP || {};
+  const all = snap.nodes || [];
+  fillProducts(all);
+  const q = ($("#q").value||"").trim().toLowerCase();
+  const prod = $("#prod").value||"";
+  const sortBy = $("#sort").value||"name";
+  const idleOnly = $("#idleonly").checked;
+
+  let nodes = all.filter(nd=>{
+    if(prod && (nd.product||"GPU")!==prod) return false;
+    if(idleOnly && nodeFreeCount(nd)<=0) return false;
+    return nodeMatches(nd, q);
+  });
+
+  const byName = (a,b)=>String(a.name||"").localeCompare(String(b.name||""));
+  const util = nd=>{ const c=nd.capacity||0; return c? (nd.allocated||0)/c : 0; };
+  if(sortBy==="free") nodes.sort((a,b)=>nodeFreeCount(b)-nodeFreeCount(a) || byName(a,b));
+  else if(sortBy==="util") nodes.sort((a,b)=>util(b)-util(a) || byName(a,b));
+  else nodes.sort(byName);
+
+  $("#ncount").textContent = all.length
+    ? (nodes.length===all.length ? all.length+"개 노드"
+                                 : nodes.length+" / "+all.length+"개 노드")
+    : "";
+
+  const host = $("#nodes");
+  if(!all.length){
+    host.innerHTML = '<div class="empty">GPU 노드 없음 (또는 아직 수집 전)</div>';
+  } else if(!nodes.length){
+    host.innerHTML = '<div class="empty">조건에 맞는 노드 없음</div>';
+  } else {
+    host.innerHTML = nodes.map(nodeCard).join("");
   }
-  $("#nodes").innerHTML = nodes.map(nodeCard).join("");
 }
 
 function card(label,val,sub,extra,cls){
@@ -472,18 +574,27 @@ function drawDonut(id,segs,total,big,small,sz){
 }
 
 function nodeCard(nd){
+  const isErr = !!nd.error;
   const cap=nd.capacity||0, alloc=nd.allocated||0;
-  const free = nd.free!=null? nd.free : Math.max((nd.allocatable||cap)-alloc,0);
-  const full = cap>0 && free===0;
-  const cls = "node"+(full?" full":"")+(nd.ready===false?" notready":"");
+  // 수집 실패 노드는 할당/유휴가 미상 — 숫자를 지어내지 않는다(free=null).
+  const free = isErr ? null
+    : (nd.free!=null? nd.free : Math.max((nd.allocatable||cap)-alloc,0));
+  const full = !isErr && cap>0 && free===0;
+  const cls = "node"+(full?" full":"")+(isErr?" err":"")+(nd.ready===false?" notready":"");
 
   // 물리 GPU 도트 매트릭스: 셀 1개 = 물리 1장. 색 = 점유 워크로드, 빈칸 = 유휴,
   // 분할(공유/MIG)로 빠진 장은 모드색 + parent 링(아래 풀로 펼쳐진 부모).
   const pmode = nodePartMode(nd);
   const dmGroups = [];
-  (nd.allocations||[]).forEach(a=>dmGroups.push({color:typeColor(a.workload_type),
-    v:a.gpu||0, title:(a.workload||"")+" ("+(a.workload_type||"")+") · "+n(a.gpu)+"GPU"}));
-  if(free>0) dmGroups.push({empty:true, v:free, title:"유휴 "+n(free)});
+  if(isErr){
+    // 유휴(빈 칸)로 오인되지 않게 capacity 를 '미상' 해치 셀로 표시.
+    if(cap>0) dmGroups.push({color:COL.unknown, cls:"unknown", v:cap,
+      title:"수집 실패 — 할당 미상 "+n(cap)+"장"});
+  } else {
+    (nd.allocations||[]).forEach(a=>dmGroups.push({color:typeColor(a.workload_type),
+      v:a.gpu||0, title:(a.workload||"")+" ("+(a.workload_type||"")+") · "+n(a.gpu)+"GPU"}));
+    if(free>0) dmGroups.push({empty:true, v:free, title:"유휴 "+n(free)});
+  }
   if((nd.shared_backing||0)>0) dmGroups.push({color:(MODE_COLOR[pmode]||COL.slice),
     cls:"parent "+(MODE_CELL[pmode]||"ts"), v:nd.shared_backing,
     title:(MODE_LABEL[pmode]||"분할")+" 전환 "+n(nd.shared_backing)+"장 → 아래 풀"});
@@ -505,7 +616,9 @@ function nodeCard(nd){
     allocs = '<div class="idle">할당된 GPU 없음 (전부 유휴)</div>';
   }
 
-  const freeCls = free===0? "free none":"free";
+  const freeCls = (!isErr && free===0)? "free none":"free";
+  const allocTxt = isErr? "–" : n(alloc);
+  const freeTxt = isErr? "–" : n(free);
   const pools = nd.shared_pools||[];
   const hasShared = pools.length>0 || (nd.shared_backing||0)>0;
   const hasMig = pools.some(p=>modeOf(p.mode)==="mig");
@@ -524,10 +637,11 @@ function nodeCard(nd){
       +'<span class="nname">'+esc(nd.name)+'</span>'
       +'<span class="prodchip">'+esc(nd.product||"GPU")+'</span>'
       +(full?'<span class="fullbadge" title="온전 GPU 유휴 0 — 통짜 스케줄 여유 없음">FULL</span>':'')
+      +(isErr?'<span class="errbadge" title="Pod 수집 실패 — 할당/유휴 미상">수집실패</span>':'')
       +(nd.ready===false?'<span class="notready-tag" style="font-size:11px">NotReady</span>':'')
       +'<span class="nspacer"></span>'
-      +'<span class="nstat">할당 <b>'+n(alloc)+'</b>/'+n(cap)
-        +' · 유휴 <b class="'+freeCls+'">'+n(free)+'</b></span>'
+      +'<span class="nstat">할당 <b>'+allocTxt+'</b>/'+n(cap)
+        +' · 유휴 <b class="'+freeCls+'">'+freeTxt+'</b></span>'
     +'</div>'
     +recon
     +dm
@@ -588,22 +702,55 @@ function sharedBlock(nd){
   return html;
 }
 
+function relTime(sec){
+  if(sec<5) return "방금";
+  if(sec<60) return sec+"초 전";
+  if(sec<3600) return Math.floor(sec/60)+"분 전";
+  return Math.floor(sec/3600)+"시간 전";
+}
+
+// #updated 라벨 + livedot 을 매초 갱신(수집 나이·정체 표시). fetch 와 독립적으로 돈다.
+function updateAge(){
+  if(!CONN_OK || !LAST_TS) return;
+  const age = Date.now()-TS_AT, sec = Math.max(0, Math.round(age/1000));
+  const stale = age > STALE_MS;
+  $("#updated").textContent = LAST_TS + " · " + relTime(sec) + (stale? " ⚠ 정체":"");
+  $("#updated").title = stale
+    ? "스냅샷이 "+sec+"초째 그대로 — 백그라운드 수집이 지연됐을 수 있습니다"
+    : "마지막 수집 시각";
+  $("#livedot").style.background = stale? "var(--warn)":"var(--up)";
+}
+
 async function tick(){
   try{
     const r = await fetch(BASE_PATH+"/api/snapshot",{cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    render(await r.json());
-    $("#livedot").style.background="var(--up)";
+    const snap = await r.json();
+    CONN_OK = true;
+    render(snap);
+    // ts 가 바뀐 순간을 기록 — 안 바뀌면 나이가 늘어 '정체'로 드러난다.
+    if(snap.ts && snap.ts!==LAST_TS){ LAST_TS = snap.ts; TS_AT = Date.now(); }
+    updateAge();
   }catch(e){
+    CONN_OK = false;
     $("#livedot").style.background="var(--down)";
     $("#updated").textContent="연결 실패";
+    $("#updated").title="";
   }
 }
+
+// 컨트롤(검색/제품/정렬/유휴만) 변경 -> 재fetch 없이 노드 그리드만 다시 그린다.
+["q","prod","sort","idleonly"].forEach(id=>{
+  const el = document.getElementById(id);
+  if(el) el.addEventListener(id==="q"?"input":"change",
+                             ()=>{ if(LAST_SNAP) renderNodes(); });
+});
 
 let timer=null;
 function loop(){ if(timer) clearInterval(timer);
   if($("#auto").checked){ timer=setInterval(tick, REFRESH_MS); } }
 $("#auto").addEventListener("change", loop);
+setInterval(updateAge, 1000);
 tick(); loop();
 </script>
 </body>

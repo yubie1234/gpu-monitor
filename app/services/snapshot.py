@@ -49,6 +49,8 @@ def summarize(snap):
     """
     s = {"node_count": 0, "gpu_capacity": 0, "gpu_allocated": 0, "gpu_free": 0,
          "gpu_physical": 0, "gpu_shared_backing": 0,
+         # 수집 실패(error) 노드의 온전 GPU — 할당/유휴가 미상이라 free 로 세지 않고 따로.
+         "gpu_unknown": 0,
          "products": {}, "by_workload_type": {}, "by_namespace": {},
          # 사용 목적/환경 — 워크로드 타입과 독립된 재집계 축(라벨 기반). 온전 GPU 기준.
          "by_purpose": {}, "by_environment": {},
@@ -64,51 +66,62 @@ def summarize(snap):
     for n in nodes:
         cap = n.get("capacity") or 0
         alloc = n.get("allocated") or 0
-        free = n.get("free")
-        if free is None:
-            free = max((n.get("allocatable") or cap) - alloc, 0)
         # 물리 장수는 라벨(gpu.count) 기준, 없으면 온전 capacity 로 폴백.
         phys = n.get("physical")
         if phys is None:
             phys = cap
+        # capacity/physical 은 노드 오브젝트에서 확정된다(노드 목록 수집은 성공) — 항상 집계.
+        # 반면 할당/유휴는 Pod 수집(collect_allocations)에 의존하므로 실패 노드에선 미상.
+        errored = bool(n.get("error"))
         s["gpu_capacity"] += cap
-        s["gpu_allocated"] += alloc
-        s["gpu_free"] += free
         s["gpu_physical"] += phys
         s["gpu_shared_backing"] += n.get("shared_backing") or 0
         prod = n.get("product") or "GPU"
         p = s["products"].setdefault(
             prod, {"capacity": 0, "allocated": 0, "free": 0, "physical": 0})
         p["capacity"] += cap
-        p["allocated"] += alloc
-        p["free"] += free
         p["physical"] += phys
+        if errored:
+            # 할당/유휴 미상 — capacity 를 '유휴'로 착시시키지 않게 gpu_free 대신 gpu_unknown 으로.
+            s["gpu_unknown"] += cap
+        else:
+            free = n.get("free")
+            if free is None:
+                free = max((n.get("allocatable") or cap) - alloc, 0)
+            s["gpu_allocated"] += alloc
+            s["gpu_free"] += free
+            p["allocated"] += alloc
+            p["free"] += free
         for pool in n.get("shared_pools") or []:
             pc = pool.get("capacity") or 0
+            prof = pool.get("profile") or pool.get("resource") or "shared"
+            mode = pool.get("mode") or "shared"
+            res = pool.get("resource") or prof
+            bp = s["shared"]["by_profile"].setdefault(
+                prof, {"capacity": 0, "allocated": 0, "free": 0})
+            bm = s["shared"]["by_mode"].setdefault(
+                mode, {"capacity": 0, "allocated": 0, "free": 0})
+            ep = s["shared"]["pools"].setdefault(res, {
+                "resource": res, "profile": pool.get("profile"), "mode": mode,
+                "capacity": 0, "allocated": 0, "free": 0})
+            # capacity 는 노드 status 에서 확정 — 항상 집계.
+            s["shared"]["capacity"] += pc
+            bp["capacity"] += pc
+            bm["capacity"] += pc
+            ep["capacity"] += pc
+            if errored:
+                # 온전 GPU 와 동일 — 슬롯 점유가 미상이라 allocated/free 는 세지 않는다.
+                continue
             pa = pool.get("allocated") or 0
             pf = pool.get("free")
             if pf is None:
                 pf = max((pool.get("allocatable") or pc) - pa, 0)
-            s["shared"]["capacity"] += pc
             s["shared"]["allocated"] += pa
             s["shared"]["free"] += pf
-            prof = pool.get("profile") or pool.get("resource") or "shared"
-            bp = s["shared"]["by_profile"].setdefault(
-                prof, {"capacity": 0, "allocated": 0, "free": 0})
-            bp["capacity"] += pc
             bp["allocated"] += pa
             bp["free"] += pf
-            mode = pool.get("mode") or "shared"
-            bm = s["shared"]["by_mode"].setdefault(
-                mode, {"capacity": 0, "allocated": 0, "free": 0})
-            bm["capacity"] += pc
             bm["allocated"] += pa
             bm["free"] += pf
-            res = pool.get("resource") or prof
-            ep = s["shared"]["pools"].setdefault(res, {
-                "resource": res, "profile": pool.get("profile"), "mode": mode,
-                "capacity": 0, "allocated": 0, "free": 0})
-            ep["capacity"] += pc
             ep["allocated"] += pa
             ep["free"] += pf
         for a in n.get("allocations") or []:
