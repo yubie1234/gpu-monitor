@@ -248,7 +248,7 @@ const $ = (s)=>document.querySelector(s);
 // 뷰 상태 — 마지막 스냅샷을 들고 있다가 검색/정렬만 바뀌면 재-fetch 없이 노드만 다시 그린다.
 let LAST = null;          // 마지막으로 렌더한 스냅샷
 let lastOkAt = null;      // 마지막 성공 수신 시각(ms) — 서버 시계와 무관하게 신선도 판정
-let connOk = false;       // 직전 fetch 성공 여부
+let connOk = true;        // 직전 fetch 성공 여부(초기 로딩 중엔 실패로 오표기하지 않게 true)
 let onlyProblems = false; // 문제(NotReady/에러) 노드만 필터 토글
 // 데이터가 갱신 주기의 2.5배+여유 넘게 안 들어오면 stale 로 간주(경고색).
 const STALE_MS = REFRESH_MS * 2.5 + 4000;
