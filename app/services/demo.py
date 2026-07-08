@@ -4,6 +4,7 @@ allocation 의 purpose/environment 는 라이브에선 classify_purpose/classify
 가 pod 라벨로 채우지만, 데모는 하드코딩 dict 라 대표값을 직접 넣는다.
 """
 
+import time
 from datetime import datetime
 
 from app import __version__
@@ -80,6 +81,7 @@ def demo_snapshot():
     ]
     snap = {"version": __version__,
             "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "ts_epoch": time.time(),
             "nodes": nodes, "summary": {}, "k8s_enabled": False,
             "errors": [], "demo": True}
     snap["summary"] = summarize(snap)

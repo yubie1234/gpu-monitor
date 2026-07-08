@@ -558,6 +558,25 @@ class TestSummarize(unittest.TestCase):
         self.assertEqual(s["by_namespace"], {})
 
 
+class TestSnapshotFreshness(unittest.TestCase):
+    """스냅샷 신선도 필드(ts_epoch) — 대시보드 나이 계산의 단일 진실원."""
+
+    def test_demo_snapshot_has_ts_epoch(self):
+        from app.services.demo import demo_snapshot
+        snap = demo_snapshot()
+        self.assertIn("ts_epoch", snap)
+        self.assertIsInstance(snap["ts_epoch"], float)
+        self.assertGreater(snap["ts_epoch"], 0)
+
+    def test_build_snapshot_k8s_disabled_has_ts_epoch(self):
+        # in-cluster 토큰 없는 경로(k8s 비활성)에서도 ts_epoch 가 실린다.
+        from app.services.snapshot import build_snapshot
+        snap = build_snapshot({"demo": False})
+        self.assertFalse(snap["k8s_enabled"])
+        self.assertIsInstance(snap.get("ts_epoch"), float)
+        self.assertGreater(snap["ts_epoch"], 0)
+
+
 class TestPrometheus(unittest.TestCase):
     def _snap(self):
         return {

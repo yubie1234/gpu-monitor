@@ -30,6 +30,11 @@
     display:flex;align-items:center;gap:14px}
   .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
   .dot.live{background:var(--up);animation:pulse 2s infinite}
+  /* 신선도: 스냅샷이 오래되면(수집 정체) 호박색으로 — HTTP fetch 성공만으로 초록 유지하지 않게. */
+  .dot.stale{background:var(--warn);animation:none}
+  .dot.down{background:var(--down);animation:none}
+  #age{color:var(--faint)}
+  #age.stale{color:var(--warn)}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.45)}
     70%{box-shadow:0 0 0 6px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
   @media (prefers-reduced-motion:reduce){.dot.live{animation:none}}
@@ -60,6 +65,21 @@
     margin:0 0 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .sec-title .src{font-family:var(--mono);text-transform:none;letter-spacing:0;
     color:var(--faint);font-size:11px}
+
+  /* 노드 필터 툴바 — 노드가 많은 클러스터에서 스캔 비용을 줄인다(전부 클라이언트 필터). */
+  .filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .filters input[type=search]{background:var(--surface);border:1px solid var(--border);
+    color:var(--text);border-radius:7px;padding:6px 10px;font-family:var(--sans);
+    font-size:12.5px;min-width:220px;flex:0 1 260px}
+  .filters input[type=search]::placeholder{color:var(--faint)}
+  .filters input[type=search]:focus{outline:none;border-color:var(--accent)}
+  .chip{font-size:11.5px;color:var(--muted);background:var(--surface);
+    border:1px solid var(--border);border-radius:20px;padding:4px 11px;cursor:pointer;
+    user-select:none;white-space:nowrap}
+  .chip:hover{border-color:var(--accent);color:var(--text)}
+  .chip.on{color:var(--accent);border-color:rgba(110,139,255,.55);background:rgba(110,139,255,.1)}
+  .filters .fspacer{flex:1}
+  .fcount{font-family:var(--mono);font-size:11.5px;color:var(--faint);white-space:nowrap}
 
   /* 노드 카드 그리드 */
   .nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
@@ -186,7 +206,8 @@
     <a class="exp" id="grafana-link" href="__GRAFANA_URL_ATTR__" target="_blank" rel="noopener"
        title="시간별 추세·히스토리는 Grafana 에서" style="display:none">📈 Grafana</a>
     <a class="exp" href="__BASE_PATH_ATTR__/snapshot.json" title="현재 상태를 JSON 으로 다운로드">💾 JSON</a>
-    <div class="meta"><span><span class="dot live" id="livedot"></span><span id="updated">…</span></span></div>
+    <div class="meta"><span><span class="dot live" id="livedot"></span><span id="updated">…</span>
+      <span id="age"></span></span></div>
   </header>
 
   <div id="banner"></div>
@@ -195,6 +216,15 @@
   <section id="nodes-sec">
     <div class="sec-title">노드별 GPU
       <span class="src">온전 capacity / allocated / free · 공유 풀(타임슬라이스)은 슬롯 단위 별도</span>
+    </div>
+    <div class="filters" id="filters">
+      <input type="search" id="q" placeholder="노드·장치·워크로드·네임스페이스 검색…"
+             autocomplete="off" spellcheck="false">
+      <span class="chip" id="f-free" data-f="free">유휴 있음</span>
+      <span class="chip" id="f-full" data-f="full">FULL</span>
+      <span class="chip" id="f-notready" data-f="notready">NotReady</span>
+      <span class="fspacer"></span>
+      <span class="fcount" id="fcount"></span>
     </div>
     <div class="nodes" id="nodes"></div>
   </section>
@@ -269,9 +299,36 @@ function nodePartMode(nd){
   return modes.length===0 ? "timeslice" : (modes.length===1 ? modes[0] : "mixed");
 }
 
+// 스냅샷 신선도: 수집 시각(ts_epoch)이 REFRESH_MS 의 3배(최소 30초)보다 오래되면 정체로 본다.
+// HTTP fetch 성공(라이브닷 초록)만으로는 수집 루프 정지를 못 잡으므로 나이로 별도 판정.
+const STALE_MS = Math.max(REFRESH_MS * 3, 30000);
+function relAge(ms){
+  const s = Math.round(ms/1000);
+  if(s < 60) return s+"초 전";
+  const m = Math.floor(s/60);
+  if(m < 60) return m+"분 전";
+  const h = Math.floor(m/60);
+  return h < 24 ? h+"시간 전" : Math.floor(h/24)+"일 전";
+}
+// 신선도 표시(나이 텍스트 + 정체 시 호박색). 성공 tick 에서만 호출.
+function updateFreshness(snap){
+  const age = $("#age"), dot = $("#livedot");
+  if(snap.ts_epoch == null){ age.textContent=""; age.className=""; return; }
+  const ms = Date.now() - snap.ts_epoch*1000;
+  const stale = ms > STALE_MS;
+  age.textContent = "("+relAge(Math.max(ms,0))+")";
+  age.className = stale ? "stale" : "";
+  dot.className = "dot " + (stale ? "stale" : "live");
+  dot.title = stale ? "수집 정체 — 스냅샷이 오래됐습니다(수집 루프 확인)" : "실시간 수집 중";
+}
+
+let lastSnap = null;   // 노드 필터가 다시 그릴 수 있게 최신 스냅샷 보관
+
 function render(snap){
+  lastSnap = snap;
   $("#ver").textContent = snap.version ? ("v"+snap.version) : "";
   $("#updated").textContent = snap.ts || "—";
+  updateFreshness(snap);
 
   // 배너
   let banner="";
@@ -354,13 +411,47 @@ function render(snap){
   $("#cards").innerHTML = cardsHtml;
   draws.forEach(fn=>{ try{ fn(); }catch(e){} });
 
-  // 노드
+  renderNodes();
+}
+
+// 노드 카드 렌더 + 클라이언트 필터(검색어 + 유휴/FULL/NotReady 토글) 적용.
+function renderNodes(){
+  const snap = lastSnap || {};
   const nodes = snap.nodes || [];
+  const box = $("#nodes"), count = $("#fcount");
   if(!nodes.length){
-    $("#nodes").innerHTML = '<div class="empty">GPU 노드 없음 (또는 아직 수집 전)</div>';
+    box.innerHTML = '<div class="empty">GPU 노드 없음 (또는 아직 수집 전)</div>';
+    count.textContent = "";
     return;
   }
-  $("#nodes").innerHTML = nodes.map(nodeCard).join("");
+  const q = ($("#q").value || "").trim().toLowerCase();
+  const on = f => document.getElementById("f-"+f).classList.contains("on");
+  const wantFree = on("free"), wantFull = on("full"), wantNotready = on("notready");
+  const shown = nodes.filter(nd=>{
+    const cap = nd.capacity||0, alloc = nd.allocated||0;
+    const free = nd.free!=null ? nd.free : Math.max((nd.allocatable||cap)-alloc, 0);
+    if(wantFree && !(free > 0)) return false;
+    if(wantFull && !(cap > 0 && free === 0)) return false;
+    if(wantNotready && nd.ready !== false) return false;
+    if(q && nodeHaystack(nd).indexOf(q) < 0) return false;
+    return true;
+  });
+  box.innerHTML = shown.length
+    ? shown.map(nodeCard).join("")
+    : '<div class="empty">필터에 맞는 노드 없음</div>';
+  const active = q || wantFree || wantFull || wantNotready;
+  count.textContent = active ? (shown.length+" / "+nodes.length+" 노드") : (nodes.length+" 노드");
+}
+
+// 노드 1개의 검색 대상 문자열 — 이름/장치/모든 워크로드·네임스페이스(공유 풀 포함).
+function nodeHaystack(nd){
+  const parts = [nd.name, nd.product, nd.product_raw, nd.sharing_strategy];
+  (nd.allocations||[]).forEach(a=>{ parts.push(a.workload, a.workload_type, a.namespace); });
+  (nd.shared_pools||[]).forEach(p=>{
+    parts.push(p.profile, p.resource);
+    (p.allocations||[]).forEach(a=>{ parts.push(a.workload, a.workload_type, a.namespace); });
+  });
+  return parts.filter(Boolean).join(" ").toLowerCase();
 }
 
 function card(label,val,sub,extra,cls){
@@ -592,13 +683,21 @@ async function tick(){
   try{
     const r = await fetch(BASE_PATH+"/api/snapshot",{cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    render(await r.json());
-    $("#livedot").style.background="var(--up)";
+    render(await r.json());   // 라이브닷/나이는 render->updateFreshness 가 신선도로 판정
   }catch(e){
-    $("#livedot").style.background="var(--down)";
+    const dot = $("#livedot");
+    dot.className = "dot down"; dot.title = "연결 실패";
     $("#updated").textContent="연결 실패";
+    $("#age").textContent=""; $("#age").className="";
   }
 }
+
+// 필터: 검색어 입력·토글 클릭 시 노드만 다시 그린다(스냅샷 재요청 없음).
+$("#q").addEventListener("input", renderNodes);
+$("#filters").addEventListener("click", (e)=>{
+  const chip = e.target.closest(".chip"); if(!chip) return;
+  chip.classList.toggle("on"); renderNodes();
+});
 
 let timer=null;
 function loop(){ if(timer) clearInterval(timer);

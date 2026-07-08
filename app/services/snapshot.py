@@ -4,6 +4,7 @@ build_snapshot(settings) -> snap dict 가 API/대시보드/JSON/Prometheus 가 �
 단일 산출물이다. 렌더러가 아니라 이 스냅샷을 바꿔서 모든 출력을 동기화한다.
 """
 
+import time
 from datetime import datetime
 
 from app import __version__
@@ -16,8 +17,11 @@ def build_snapshot(settings):
         from app.services.demo import demo_snapshot  # 지연 import (순환 방지)
         return demo_snapshot()
 
+    # ts 는 사람용 표시 문자열, ts_epoch 는 대시보드 신선도(나이) 계산용 unix epoch.
+    # ts 문자열엔 타임존이 없어 브라우저가 나이를 못 재므로 epoch 를 함께 싣는다.
     snap = {"version": __version__,
             "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "ts_epoch": time.time(),
             "nodes": [], "summary": {}, "k8s_enabled": False, "errors": []}
 
     client = K8sClient.from_settings(settings)

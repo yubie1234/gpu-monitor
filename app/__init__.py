@@ -8,4 +8,4 @@ model-monitor(LiteLLM 서빙 모니터)의 형제 프로젝트. 다만 축이 �
 수집 계층(app.core/app.services)은 표준 라이브러리만 쓴다(에어갭). 웹 계층만 FastAPI.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"

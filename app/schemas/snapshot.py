@@ -89,6 +89,7 @@ class Snapshot(BaseModel):
     model_config = ConfigDict(extra="allow")
     version: Optional[str] = None
     ts: Optional[str] = None
+    ts_epoch: Optional[float] = None  # 수집 시각(unix epoch) — 대시보드 신선도 계산용
     nodes: Optional[List[Node]] = None
     summary: Optional[Summary] = None
     k8s_enabled: Optional[bool] = None
