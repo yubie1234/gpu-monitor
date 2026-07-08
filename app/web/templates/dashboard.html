@@ -72,6 +72,10 @@
   .prodchip{font-family:var(--mono);font-size:10.5px;font-weight:600;color:#c7a6f5;
     background:rgba(176,131,240,.1);border:1px solid rgba(176,131,240,.4);
     border-radius:20px;padding:1px 9px}
+  /* 만석(온전 GPU 유휴 0) 노드 뱃지 — 테두리색만으로는 스캔이 어려워 명시 라벨 부여 */
+  .fullbadge{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--warn);
+    background:rgba(210,153,34,.14);border:1px solid rgba(210,153,34,.5);
+    border-radius:20px;padding:1px 8px;letter-spacing:.05em}
   .nspacer{flex:1}
   .nstat{font-family:var(--mono);font-size:11.5px;color:var(--faint)}
   .nstat b{color:var(--text);font-variant-numeric:tabular-nums}
@@ -191,7 +195,8 @@
     <div class="nodes" id="nodes"></div>
   </section>
 
-  <footer id="foot">gpu-monitor · 표준 라이브러리 수집 · 데이터 출처: Kubernetes API (nodes, pods)</footer>
+  <footer id="foot">gpu-monitor · 표준 라이브러리 수집 · 데이터 출처: Kubernetes API (nodes, pods)
+    · <span class="notready-tag">◌</span>/NotReady = Pod·노드 미준비 상태</footer>
 </div>
 
 <script>
@@ -302,7 +307,7 @@ function render(snap){
     + vizCard("물리 GPU", "viz-phys",
         legendHTML(physLeg) + partHTML,
         "할당률 "+pct+"% · 온전 "+n(cap))
-    + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "");
+    + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "할당 "+n(alloc)+" GPU 기준");
   if(nsItems.length){
     cardsHtml += '<div class="card"><div class="label">네임스페이스별 할당</div>'
       + rankedHTML(nsItems, alloc) + '</div>';
@@ -467,9 +472,10 @@ function nodeCard(nd){
   const hasMig = pools.some(p=>modeOf(p.mode)==="mig");
   const phys = nd.physical!=null? nd.physical : cap;
   const recon = hasShared
-    ? '<div class="nrecon"><span>물리 <b>'+n(phys)+'</b></span>'
-      +'<span>온전 <b>'+n(cap)+'</b></span>'
-      +(nd.shared_backing? '<span class="slice">분할 <b>'+n(nd.shared_backing)+'</b>장</span>':'')
+    ? '<div class="nrecon">'
+      +'<span title="이 노드의 물리 GPU 하드웨어 장수">물리 <b>'+n(phys)+'</b></span>'
+      +'<span title="분할되지 않은 통짜 GPU — 1장=1개로 스케줄되는 단위 (할당/유휴는 이 기준)">온전 <b>'+n(cap)+'</b></span>'
+      +(nd.shared_backing? '<span class="slice" title="타임슬라이스/MIG 로 쪼개 아래 공유 풀로 돌린 물리 GPU 장수">분할 <b>'+n(nd.shared_backing)+'</b>장</span>':'')
       +(nd.sharing_strategy? '<span>'+esc(nd.sharing_strategy)+'</span>':'')
       +(hasMig? '<span>MIG '+esc(nd.mig_strategy||"mixed")+'</span>':'')
       +'</div>'
@@ -478,6 +484,7 @@ function nodeCard(nd){
     +'<div class="nhead">'
       +'<span class="nname">'+esc(nd.name)+'</span>'
       +'<span class="prodchip">'+esc(nd.product||"GPU")+'</span>'
+      +(full?'<span class="fullbadge" title="온전 GPU 유휴 0 — 통짜 스케줄 여유 없음">FULL</span>':'')
       +(nd.ready===false?'<span class="notready-tag" style="font-size:11px">NotReady</span>':'')
       +'<span class="nspacer"></span>'
       +'<span class="nstat">할당 <b>'+n(alloc)+'</b>/'+n(cap)
