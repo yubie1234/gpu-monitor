@@ -1,4 +1,4 @@
-# gpu-monitor `v0.1.3`
+# gpu-monitor `v0.2.0`
 
 노드별 **GPU 할당(allocation) 현황** 대시보드. 클러스터의 각 노드가 어떤 GPU를 몇 개
 가졌고(capacity), 그중 몇 개가 어떤 워크로드에 **할당**됐는지(allocated), 몇 개가
