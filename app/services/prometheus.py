@@ -106,20 +106,22 @@ def render_prometheus_metrics(snap, meta=None):
                    % (_esc(n.get("name")), _esc(n.get("product") or "GPU"), int(b)))
 
     out.append("# HELP gpu_monitor_node_shared"
-               " Per-node shared-pool slots by resource and state (NOT physical GPUs).")
+               " Per-node partition slots by resource/mode/state"
+               " (mode=timeslice/mps/mig; NOT physical GPUs).")
     out.append("# TYPE gpu_monitor_node_shared gauge")
     for n in nodes:
         node = _esc(n.get("name"))
         prod = _esc(n.get("product") or "GPU")
         for pool in n.get("shared_pools") or []:
             res = _esc(pool.get("resource"))
+            mode = _esc(pool.get("mode") or "shared")
             for state in ("capacity", "allocatable", "allocated", "free"):
                 val = pool.get(state)
                 if val is None:
                     continue
                 out.append('gpu_monitor_node_shared{node="%s",product="%s",'
-                           'resource="%s",state="%s"} %d'
-                           % (node, prod, res, state, int(val)))
+                           'resource="%s",mode="%s",state="%s"} %d'
+                           % (node, prod, res, mode, state, int(val)))
 
     out.append("# HELP gpu_monitor_gpu_allocated_by_type Allocated GPU by workload type.")
     out.append("# TYPE gpu_monitor_gpu_allocated_by_type gauge")

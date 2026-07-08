@@ -14,10 +14,12 @@
 
 GPU_RESOURCE = "nvidia.com/gpu"
 GPU_SHARED_PREFIX = "nvidia.com/gpu."   # 공유/명명 풀 (.10gb, .10gb-mps, .full ...)
+MIG_PREFIX = "nvidia.com/mig-"          # MIG mixed 인스턴스 (nvidia.com/mig-1g.10gb ...)
 GPU_PRODUCT_LABEL = "nvidia.com/gpu.product"
 GPU_COUNT_LABEL = "nvidia.com/gpu.count"              # 물리 GPU 장수
 GPU_REPLICAS_LABEL = "nvidia.com/gpu.replicas"        # 공유 GPU 1장당 슬롯(replica) 수
 GPU_SHARING_LABEL = "nvidia.com/gpu.sharing-strategy"  # time-slicing / mps / none
+MIG_STRATEGY_LABEL = "nvidia.com/mig.strategy"        # single / mixed / none
 
 
 def gpu_qty(v):
@@ -29,15 +31,39 @@ def gpu_qty(v):
 
 
 def is_gpu_resource(key):
-    """리소스 키가 온전(nvidia.com/gpu) 또는 공유(nvidia.com/gpu.<프로파일>) GPU 인가."""
-    return key == GPU_RESOURCE or key.startswith(GPU_SHARED_PREFIX)
+    """온전(nvidia.com/gpu) / 공유(nvidia.com/gpu.<프로파일>) / MIG(nvidia.com/mig-<프로파일>) 인가."""
+    return (key == GPU_RESOURCE or key.startswith(GPU_SHARED_PREFIX)
+            or key.startswith(MIG_PREFIX))
 
 
 def shared_profile(resource):
-    """nvidia.com/gpu.10gb -> '10gb', nvidia.com/gpu.full-mps -> 'full-mps'."""
-    if resource and resource.startswith(GPU_SHARED_PREFIX):
-        return resource[len(GPU_SHARED_PREFIX):]
-    return resource
+    """nvidia.com/gpu.10gb -> '10gb', nvidia.com/mig-1g.10gb -> '1g.10gb'."""
+    return classify_gpu_resource(resource)["profile"]
+
+
+def classify_gpu_resource(key, sharing=None):
+    """GPU 리소스 키를 모드/프로파일로 분류.
+
+    -> {"mode": whole|timeslice|mps|mig|shared, "profile": 표시용 프로파일명 or None}
+      - nvidia.com/gpu            -> whole
+      - nvidia.com/mig-1g.10gb    -> mig, "1g.10gb"           (하드웨어 격리)
+      - nvidia.com/gpu.10gb-mps   -> mps, "10gb"
+      - nvidia.com/gpu.10gb-ts    -> timeslice, "10gb"
+      - nvidia.com/gpu.10gb       -> sharing-strategy(기본 timeslice), "10gb"
+    """
+    if key == GPU_RESOURCE:
+        return {"mode": "whole", "profile": None}
+    if key.startswith(MIG_PREFIX):
+        return {"mode": "mig", "profile": key[len(MIG_PREFIX):]}
+    if key.startswith(GPU_SHARED_PREFIX):
+        p = key[len(GPU_SHARED_PREFIX):]
+        if p.endswith("-mps"):
+            return {"mode": "mps", "profile": p[:-len("-mps")]}
+        if p.endswith("-ts"):
+            return {"mode": "timeslice", "profile": p[:-len("-ts")]}
+        mode = "mps" if (sharing or "").lower().startswith("mps") else "timeslice"
+        return {"mode": mode, "profile": p}
+    return {"mode": "shared", "profile": key}
 
 
 def pod_gpu_resources(pod):
@@ -103,14 +129,18 @@ def node_gpu(node):
     whole_cap = gpu_qty(cap.get(GPU_RESOURCE))
     whole_alloc = gpu_qty(alloc.get(GPU_RESOURCE))
 
-    # 공유 풀: capacity/allocatable 의 nvidia.com/gpu.<프로파일> 키 합집합.
+    # 파티션 풀: capacity/allocatable 의 nvidia.com/gpu.<프로파일> 및 nvidia.com/mig-<프로파일>
+    # 키 합집합. 각 풀에 mode(timeslice/mps/mig)/profile 을 붙인다.
     # (라벨은 metadata.labels 라 여기 capacity/allocatable 에는 섞이지 않는다.)
+    sharing = labels.get(GPU_SHARING_LABEL)
     shared = {}
     for field, src in (("capacity", cap), ("allocatable", alloc)):
         for k, v in src.items():
-            if k == GPU_RESOURCE or not k.startswith(GPU_SHARED_PREFIX):
+            if k == GPU_RESOURCE or not is_gpu_resource(k):
                 continue
-            pool = shared.setdefault(k, {"resource": k, "profile": shared_profile(k),
+            info = classify_gpu_resource(k, sharing)
+            pool = shared.setdefault(k, {"resource": k, "profile": info["profile"],
+                                         "mode": info["mode"],
                                          "capacity": 0, "allocatable": 0})
             pool[field] = gpu_qty(v)
     shared_pools = [shared[k] for k in sorted(shared)
@@ -124,7 +154,8 @@ def node_gpu(node):
             "product": short_gpu_product(raw) or ("GPU" if has_gpu else None),
             "product_raw": raw,
             "physical": physical, "replicas": replicas,
-            "sharing_strategy": labels.get(GPU_SHARING_LABEL),
+            "sharing_strategy": sharing,
+            "mig_strategy": labels.get(MIG_STRATEGY_LABEL),
             "shared_pools": shared_pools}
 
 

@@ -6,8 +6,8 @@
 
 import urllib.parse
 
-from app.services.gpu import (GPU_RESOURCE, node_gpu, node_ready,
-                              pod_gpu_resources, pod_ready, shared_profile)
+from app.services.gpu import (GPU_RESOURCE, classify_gpu_resource, node_gpu,
+                              node_ready, pod_gpu_resources, pod_ready)
 from app.services.workload import classify_workload
 
 
@@ -46,6 +46,7 @@ def collect_gpu_nodes(client, settings):
             "physical": physical,
             "replicas": g["replicas"],
             "sharing_strategy": g["sharing_strategy"],
+            "mig_strategy": g["mig_strategy"],
             "shared_backing": backing,
             "shared_pools": pools,
             "allocations": [],
@@ -89,8 +90,9 @@ def collect_allocations(client, node):
             if res == GPU_RESOURCE:
                 continue
             pool = pools.get(res)
-            if pool is None:  # capacity 엔 없던 공유 리소스를 Pod 이 점유 -> 방어적으로 풀 생성
-                pool = {"resource": res, "profile": shared_profile(res),
+            if pool is None:  # capacity 엔 없던 파티션 리소스를 Pod 이 점유 -> 방어적으로 풀 생성
+                info = classify_gpu_resource(res, node.get("sharing_strategy"))
+                pool = {"resource": res, "profile": info["profile"], "mode": info["mode"],
                         "capacity": 0, "allocatable": 0, "allocated": 0,
                         "free": None, "allocations": []}
                 pools[res] = pool

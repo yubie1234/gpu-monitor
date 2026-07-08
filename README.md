@@ -1,4 +1,4 @@
-# gpu-monitor `v0.1.2`
+# gpu-monitor `v0.1.3`
 
 노드별 **GPU 할당(allocation) 현황** 대시보드. 클러스터의 각 노드가 어떤 GPU를 몇 개
 가졌고(capacity), 그중 몇 개가 어떤 워크로드에 **할당**됐는지(allocated), 몇 개가
@@ -15,9 +15,9 @@
 - **노드별**: GPU 장치명(H100/B200…) · 할당/총량 · 유휴
 - **노드 내 할당 목록**: 각 GPU 점유 Pod 을 **워크로드 타입**과 함께
   (KServe · Job · Notebook · Deployment · StatefulSet · …, Pod 라벨/owner 로 추정)
-- **공유(타임슬라이스/MPS) 풀**: 물리 GPU 1장을 여러 슬롯으로 쪼갠 `nvidia.com/gpu.<프로파일>`
-  (예: `nvidia.com/gpu.10gb`)을 **슬롯 단위로 별도** 표시. "물리 8장 중 1장이 슬라이스"까지 재구성
-  (아래 [공유 GPU](#공유-타임슬라이스mps-gpu) 참고)
+- **파티션 GPU (공유·MIG)**: 물리 GPU 1장을 쪼갠 `nvidia.com/gpu.<프로파일>`(타임슬라이스/MPS)
+  또는 `nvidia.com/mig-<프로파일>`(MIG)을 **슬롯/인스턴스 단위로 별도** 표시. "물리 8장 중 1장이
+  분할"까지 재구성 (아래 [파티션 GPU](#파티션-gpu--공유타임슬라이스mps--mig) 참고)
 - **클러스터 집계**: 총/할당/유휴 GPU, 장치별·워크로드 타입별 분포
 - Prometheus `/metrics`
 
@@ -55,8 +55,8 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 | `gpu_monitor_nodes` | gauge | – | GPU 노드 수 |
 | `gpu_monitor_node_gpu` | gauge | `node`, `product`, `state` | 노드별 온전 GPU — state=capacity/allocatable/allocated/free (값 `None` 이면 라인 생략) |
 | `gpu_monitor_node_physical` | gauge | `node`, `product` | 노드 물리 GPU 장수 (`nvidia.com/gpu.count`; 라벨 없으면 라인 생략) |
-| `gpu_monitor_node_shared_backing` | gauge | `node`, `product` | 그 노드에서 공유 풀로 빠진 물리 장수 (= physical − whole) |
-| `gpu_monitor_node_shared` | gauge | `node`, `product`, `resource`, `state` | 노드 공유 풀 슬롯 — resource=`nvidia.com/gpu.10gb` 등, state=capacity/allocatable/allocated/free |
+| `gpu_monitor_node_shared_backing` | gauge | `node`, `product` | 그 노드에서 파티션(공유/MIG)으로 빠진 물리 장수 (= physical − whole) |
+| `gpu_monitor_node_shared` | gauge | `node`, `product`, `resource`, `mode`, `state` | 노드 파티션 풀 슬롯/인스턴스 — resource=`nvidia.com/gpu.10gb`·`nvidia.com/mig-1g.10gb` 등, mode=timeslice/mps/mig, state=capacity/allocatable/allocated/free |
 | `gpu_monitor_node_ready` | gauge (0/1) | `node` | 노드 Ready — free>0 이어도 0 이면 스케줄 불가 |
 | `gpu_monitor_node_info` | gauge (상수 1) | `node`, `product`, `product_raw` | 축약 제품명 ↔ GFD 원문 라벨 매핑 |
 | `gpu_monitor_node_collect_error` | gauge (0/1) | `node`, `product` | 노드 Pod 조회 실패 — 1 이면 그 노드 allocation 이 과소집계 중 |
@@ -76,29 +76,36 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 - 네임스페이스·노드·GPU 제품명이 라벨로 노출된다 — `/metrics` 는 무인증이므로 외부 노출 시 주의.
   워크로드·Pod 명은 라벨엔 없지만 무인증 `/api/snapshot` 에 노출된다(배포 절 참고).
 
-## 공유 (타임슬라이스/MPS) GPU
+## 파티션 GPU — 공유(타임슬라이스/MPS) · MIG
 
-한 노드가 물리 GPU 일부를 타임슬라이스/MPS 로 쪼개 쓰면, K8s 는 온전 GPU 와 **다른
-리소스명**으로 슬롯을 광고한다 — 예: `nvidia.com/gpu.10gb`(H100 80GB 를 replicas=8 로 쪼갠
-10GB 슬롯 8개). 슬롯은 물리 장수와 **단위가 다르다**(1 슬롯 ≠ 1장). 그래서 합치지 않고
-**따로** 집계한다.
+한 노드가 물리 GPU 일부를 쪼개 쓰면 K8s 는 온전 GPU 와 **다른 리소스명**으로 하위 단위를
+광고한다. 하위 단위는 물리 장수와 **단위가 다르다**(1 슬롯/인스턴스 ≠ 1장) — 합치지 않고
+**따로** 집계하고, 각 풀에 `mode` 를 붙인다.
+
+| mode | 리소스명 | 격리 | 비고 |
+|---|---|---|---|
+| `timeslice` | `nvidia.com/gpu.10gb`, `...-ts` | **없음**(전체 VRAM 공유) | 이름의 GB 는 라벨일 뿐 |
+| `mps` | `nvidia.com/gpu.10gb-mps` | 부분 | MPS 병렬 |
+| `mig` | `nvidia.com/mig-1g.10gb` | **하드웨어**(GB 보장) | 실제 파티션 (`mig.strategy=mixed`) |
 
 ```
 Capacity:  nvidia.com/gpu: 7   nvidia.com/gpu.10gb: 8
 Labels:    nvidia.com/gpu.count: 8   nvidia.com/gpu.replicas: 8
            nvidia.com/gpu.sharing-strategy: time-slicing
-        →  물리 8 − 온전 7 = 1장이 타임슬라이스로 빠짐 → .10gb 8슬롯 (= 1장 × replicas 8)
+        →  물리 8 − 온전 7 = 1장이 분할로 빠짐 → .10gb 8슬롯 (= 1장 × replicas 8)
 ```
 
-- **물리 장수**는 노드 라벨 `nvidia.com/gpu.count`. **공유로 빠진 장수** = `count − nvidia.com/gpu`
-  (추정 아님, 산수). 라벨이 없으면 물리 = 온전 capacity 로 폴백한다.
-- 온전 GPU 집계(`gpu_capacity`/`by_workload_type`/…)는 **그대로**라 기존 Grafana·알럿은 안 바뀐다.
-  공유는 `*_physical` / `*_shared*` / `cluster_shared_slots` **신규 계열**로만 노출.
-- 대시보드: 노드 헤더에 `물리 8 · 온전 7 · 슬라이스 1장`, 그 아래 공유 풀 섹션이 슬롯 할당을
-  프로파일(`10gb`)별로 보여준다. JSON 은 노드의 `physical`/`shared_backing`/`shared_pools`,
-  summary 의 `gpu_physical`/`shared`.
-- **MIG 아님**: 타임슬라이스는 메모리를 하드 분할하지 않는다(슬롯끼리 전체 VRAM 공유). `.10gb`
-  는 device-plugin 설정상 붙인 **이름**일 뿐 강제 한도가 아니다 — 실사용률은 여전히 DCGM 영역.
+- **물리 장수**는 라벨 `nvidia.com/gpu.count`. **분할로 빠진 장수** = `count − nvidia.com/gpu`
+  (추정 아님, 산수). 라벨 없으면 물리 = 온전 capacity 로 폴백.
+- 온전 GPU 집계(`gpu_capacity`/`by_workload_type`/…)는 **그대로**라 기존 Grafana·알럿 불변.
+  파티션은 `*_physical` / `*_shared*` / `cluster_shared_slots` **신규 계열**로만 노출
+  (`node_shared` 는 `mode` 라벨로 timeslice/mps/mig 구분).
+- 대시보드: 노드 헤더 `물리 8 · 온전 7 · 분할 1장`, 물리 도트에서 분할된 장은 **parent 링**
+  으로 남고 바로 아래 `└→` 로 그 슬롯/인스턴스에 연결(1장의 '행방'). 풀마다 **모드 배지**
+  (TS/MPS/MIG), MIG 셀은 실선(격리)·TS/MPS 는 점선(소프트).
+- `mig.strategy=single` 은 인스턴스가 `nvidia.com/gpu` 로 나와 온전처럼 처리된다(별도 작업 없음).
+- **실사용률은 여전히 다루지 않는다** — 타임슬라이스 `.10gb` 는 이름표일 뿐 강제 한도가
+  아니고, 실제 %/VRAM 은 DCGM 영역.
 
 ## 필요한 RBAC
 

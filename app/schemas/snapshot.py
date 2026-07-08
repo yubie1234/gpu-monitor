@@ -29,10 +29,12 @@ class SharedAllocation(BaseModel):
 
 
 class SharedPool(BaseModel):
-    """공유(타임슬라이스/MPS) 풀 — nvidia.com/gpu.<프로파일>. 슬롯 단위(1 슬롯 ≠ 1 물리장)."""
+    """파티션 풀 — 공유(nvidia.com/gpu.<프로파일>) 또는 MIG(nvidia.com/mig-<프로파일>).
+    슬롯/인스턴스 단위(1 ≠ 1 물리장)."""
     model_config = ConfigDict(extra="allow")
-    resource: Optional[str] = None   # 예: nvidia.com/gpu.10gb
-    profile: Optional[str] = None    # 예: 10gb, full-mps
+    resource: Optional[str] = None   # 예: nvidia.com/gpu.10gb, nvidia.com/mig-1g.10gb
+    profile: Optional[str] = None    # 예: 10gb, 1g.10gb
+    mode: Optional[str] = None       # timeslice | mps | mig
     capacity: Optional[int] = None
     allocatable: Optional[int] = None
     allocated: Optional[int] = None
@@ -54,7 +56,8 @@ class Node(BaseModel):
     physical: Optional[int] = None        # 물리 GPU 장수 (nvidia.com/gpu.count)
     replicas: Optional[int] = None        # 공유 GPU 1장당 슬롯 수
     sharing_strategy: Optional[str] = None  # time-slicing / mps
-    shared_backing: Optional[int] = None  # 공유로 빠진 물리 장수 (= physical - capacity)
+    mig_strategy: Optional[str] = None    # single / mixed
+    shared_backing: Optional[int] = None  # 파티션(공유/MIG)으로 빠진 물리 장수 (= physical - capacity)
     shared_pools: Optional[List[SharedPool]] = None
     allocations: Optional[List[Allocation]] = None
     error: Optional[str] = None

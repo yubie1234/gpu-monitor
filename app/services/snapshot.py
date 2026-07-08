@@ -50,8 +50,9 @@ def summarize(snap):
     s = {"node_count": 0, "gpu_capacity": 0, "gpu_allocated": 0, "gpu_free": 0,
          "gpu_physical": 0, "gpu_shared_backing": 0,
          "products": {}, "by_workload_type": {}, "by_namespace": {},
-         # 공유(타임슬라이스/MPS) 슬롯 — 온전 GPU 와 단위가 달라 절대 합치지 않는다.
-         "shared": {"capacity": 0, "allocated": 0, "free": 0, "by_profile": {}},
+         # 파티션(타임슬라이스/MPS/MIG) 슬롯 — 온전 GPU 와 단위가 달라 절대 합치지 않는다.
+         "shared": {"capacity": 0, "allocated": 0, "free": 0,
+                    "by_profile": {}, "by_mode": {}},
          # ready 버킷은 항상 양쪽을 채운다(0 이어도) — 메트릭 absent 방지.
          # 키는 소문자 문자열: JSON API 와 Prometheus 라벨이 같은 표현을 쓴다.
          "by_ready": {"true": 0, "false": 0}}
@@ -94,6 +95,12 @@ def summarize(snap):
             bp["capacity"] += pc
             bp["allocated"] += pa
             bp["free"] += pf
+            mode = pool.get("mode") or "shared"
+            bm = s["shared"]["by_mode"].setdefault(
+                mode, {"capacity": 0, "allocated": 0, "free": 0})
+            bm["capacity"] += pc
+            bm["allocated"] += pa
+            bm["free"] += pf
         for a in n.get("allocations") or []:
             gpu = a.get("gpu") or 0
             t = a.get("workload_type") or "기타"
