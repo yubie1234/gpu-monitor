@@ -663,5 +663,39 @@ class TestObservability(unittest.TestCase):
         self.assertIsNone(store.get())
 
 
+class DashboardInjectionTest(unittest.TestCase):
+    """대시보드 placeholder 주입 — 템플릿↔routes 간 이름 드리프트 회귀 가드.
+
+    web 계층은 FastAPI 를 끌어오므로, 미설치 환경에선 skip 해 'FastAPI 불필요'
+    속성(테스트 스위트가 FastAPI 없이 통과)을 유지한다.
+    """
+
+    def _load(self, *args, **kw):
+        try:
+            from app.web.routes import load_dashboard_html
+        except ImportError:
+            self.skipTest("FastAPI 미설치 — 웹 계층 테스트 생략")
+        return load_dashboard_html(*args, **kw)
+
+    def test_grafana_url_injected(self):
+        url = "https://grafana.example.com/d/gpu-alloc/gpu"
+        html = self._load(15000, "", url)
+        self.assertIn(url, html)
+        self.assertNotIn("__GRAFANA_URL__", html)   # placeholder 소진 확인
+
+    def test_grafana_url_empty_still_replaced(self):
+        # 비워도 placeholder 는 사라진다(링크는 JS 가 숨김) — 잔여 토큰 금지.
+        html = self._load(15000, "", "")
+        self.assertNotIn("__GRAFANA_URL__", html)
+
+    def test_url_injection_escaped(self):
+        # 운영자 값이 HTML 속성·JS 문자열 어느 문맥도 탈출하지 못해야(주입 방어).
+        html = self._load(15000, '/x"><b>',
+                          'https://g/?x"></a><script>alert(1)</script>')
+        self.assertNotIn('"></a>', html)            # 속성/JS 문자열 탈출 조각
+        self.assertNotIn("<script>alert(1)", html)  # </script> 조기 종료 조각
+        self.assertNotIn('/x"><b>', html)           # base_path 속성 탈출 조각
+
+
 if __name__ == "__main__":
     unittest.main()
