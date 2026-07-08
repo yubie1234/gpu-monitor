@@ -1,4 +1,4 @@
-# gpu-monitor `v0.2.0`
+# gpu-monitor `v0.3.0`
 
 노드별 **GPU 할당(allocation) 현황** 대시보드. 클러스터의 각 노드가 어떤 GPU를 몇 개
 가졌고(capacity), 그중 몇 개가 어떤 워크로드에 **할당**됐는지(allocated), 몇 개가
@@ -36,7 +36,7 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 
 ## 엔드포인트
 
-- `/` — 대시보드(HTML)
+- `/` — 대시보드(HTML). `MONITOR_GRAFANA_URL` 설정 시 헤더에 📈 Grafana 딥링크 노출(히스토리·추세용)
 - `/api/snapshot` — 노드별 GPU 할당 JSON
 - `/snapshot.json` — 다운로드
 - `/metrics` — Prometheus
@@ -157,6 +157,7 @@ python3 -m unittest -v            # stdlib unittest, FastAPI 불필요
 | `MONITOR_NODE_SELECTOR` | – | GPU 노드 필터 라벨셀렉터(예: `nvidia.com/gpu.present=true`) |
 | `MONITOR_METRICS` | `true` | `/metrics` on/off |
 | `MONITOR_ROOT_PATH` | – | 리버스 프록시 프리픽스(예: `/service/gpu-monitor`) — 직접 접근 시엔 비울 것 |
+| `MONITOR_GRAFANA_URL` | – | 대시보드 헤더 📈 Grafana 딥링크(외부 절대 URL). 히스토리·추세는 Grafana 담당 — 비우면 링크 숨김 |
 | `MONITOR_CONFIG_FILE` | – | 설정 파일(`.json`, PyYAML 있으면 `.yaml`) |
 | `MONITOR_K8S_*` | – | api_server / token_file / ca_file / insecure / timeout |
 

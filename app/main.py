@@ -37,6 +37,7 @@ def create_app() -> FastAPI:
     app.state.settings = collector
     app.state.interval_ms = int(max(settings.interval, 1.0) * 1000)
     app.state.base_path = root_path
+    app.state.grafana_url = settings.grafana_url.strip()
     app.state.refresher = Refresher(collector, store, settings.interval)
 
     app.include_router(api_router)
