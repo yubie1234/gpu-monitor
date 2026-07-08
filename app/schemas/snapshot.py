@@ -93,3 +93,6 @@ class Snapshot(BaseModel):
     summary: Optional[Summary] = None
     k8s_enabled: Optional[bool] = None
     errors: Optional[List[str]] = None
+    # 신선도 meta — 요청 시점에 라우트가 채운다(스냅샷 빌드가 아니라).
+    # age_seconds/stale/interval_seconds. 첫 수집 전이면 age=None, stale=False.
+    meta: Optional[Dict[str, Any]] = None

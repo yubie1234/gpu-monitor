@@ -40,7 +40,9 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 ## 엔드포인트
 
 - `/` — 대시보드(HTML). `MONITOR_GRAFANA_URL` 설정 시 헤더에 📈 Grafana 딥링크 노출(히스토리·추세용)
-- `/api/snapshot` — 노드별 GPU 할당 JSON
+- `/api/snapshot` — 노드별 GPU 할당 JSON. `meta`(`age_seconds`/`stale`/`interval_seconds`)로
+  마지막 성공 수집 이후 경과·정체 여부를 함께 낸다(요청 시점 서버 시계 기준). 대시보드는
+  이 값으로 라이브 점을 정체 시 경고색으로 바꾸고 정체 배너를 띄운다.
 - `/snapshot.json` — 다운로드
 - `/metrics` — Prometheus
 - `/healthz`, `/readyz`

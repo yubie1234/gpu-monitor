@@ -30,6 +30,8 @@
     display:flex;align-items:center;gap:14px}
   .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
   .dot.live{background:var(--up);animation:pulse 2s infinite}
+  /* 정체(stale) 상태 — 초록 펄스는 끄고 경고색으로. 배경색은 스크립트가 --warn 으로 덮는다. */
+  .dot.live.stale{animation:none}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.45)}
     70%{box-shadow:0 0 0 6px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
   @media (prefers-reduced-motion:reduce){.dot.live{animation:none}}
@@ -95,7 +97,7 @@
   .wtype.kserve{color:#9db0ff;border-color:rgba(110,139,255,.45);background:rgba(110,139,255,.1)}
   .wtype.job{color:#e9c46a;border-color:rgba(210,153,34,.45);background:rgba(210,153,34,.1)}
   .wtype.notebook{color:#c7a6f5;border-color:rgba(176,131,240,.45);background:rgba(176,131,240,.1)}
-  .wtype.deployment,.wtype.statefulset{color:#7ee2a8;border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.09)}
+  .wtype.deployment,.wtype.statefulset,.wtype.daemonset{color:#7ee2a8;border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.09)}
   .wtype.etc{color:var(--muted);border-color:var(--border);background:var(--surface)}
   .notready-tag{color:var(--warn)}
   .idle{color:var(--faint);font-style:italic;font-size:12px;padding:4px 2px}
@@ -166,6 +168,7 @@
   .empty{color:var(--muted);padding:26px;text-align:center;font-style:italic;
     border:1px solid var(--border);border-radius:9px;background:var(--surface)}
   #banner:not(:empty){margin-bottom:16px}
+  .note-banner + .note-banner{margin-top:8px}
   .note-banner{color:var(--warn);font-family:var(--mono);font-size:12px;
     background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.3);
     border-radius:7px;padding:9px 12px}
@@ -243,7 +246,7 @@ function productColor(name){
 }
 function typeClass(t){
   const k=String(t||"").toLowerCase();
-  if(["kserve","job","notebook","deployment","statefulset"].includes(k)) return k;
+  if(["kserve","job","notebook","deployment","statefulset","daemonset"].includes(k)) return k;
   return "etc";
 }
 
@@ -269,15 +272,36 @@ function nodePartMode(nd){
   return modes.length===0 ? "timeslice" : (modes.length===1 ? modes[0] : "mixed");
 }
 
+// 초 단위 나이 -> 사람이 읽는 상대 시각. 라이브 점/배너의 '마지막 수집 N전' 표기용.
+function relAge(sec){
+  sec = Math.max(0, Math.round(Number(sec)||0));
+  if(sec < 60) return sec+"초 전";
+  if(sec < 3600) return Math.floor(sec/60)+"분 전";
+  return Math.floor(sec/3600)+"시간 전";
+}
+
 function render(snap){
   $("#ver").textContent = snap.version ? ("v"+snap.version) : "";
-  $("#updated").textContent = snap.ts || "—";
 
-  // 배너
+  // 신선도 — 서버가 요청 시점에 잰 나이(age)로 정체 여부 판단(브라우저 시계 미사용).
+  // 정체(stale)면 라이브 점을 경고색으로 바꾸고 배너를 띄운다 — HTTP 200 만으로는
+  // '오래된 스냅샷'을 구분 못 하므로(수집 루프가 멈춰도 마지막 스냅샷은 계속 반환됨).
+  const meta = snap.meta || {};
+  const age = meta.age_seconds;
+  const stale = !!meta.stale;
+  $("#updated").textContent = (snap.ts || "—") + (age!=null ? " · "+relAge(age) : "");
+  const dot = $("#livedot");
+  dot.classList.toggle("stale", stale);
+  dot.style.background = stale ? "var(--warn)" : "var(--up)";
+  dot.title = age!=null ? ("마지막 수집 "+relAge(age)) : "";
+
+  // 배너 — 정체는 다른 상태(errors 등)와 겹칠 수 있어 맨 위에 별도로 얹는다.
   let banner="";
-  if(snap.demo){ banner='<div class="note-banner info">🧪 DEMO — 샘플 데이터 (라이브 클러스터 아님)</div>'; }
-  else if(!snap.k8s_enabled){ banner='<div class="note-banner">⚠ k8s 비활성 — in-cluster 토큰 없음. 미리보기는 MONITOR_DEMO=true</div>'; }
-  else if((snap.errors||[]).length){ banner='<div class="note-banner">⚠ '+esc(snap.errors.join(" · "))+'</div>'; }
+  if(stale){ banner+='<div class="note-banner">⚠ 데이터 정체 — 마지막 수집 '
+    +esc(relAge(age))+' (백그라운드 수집 지연/중단?). 표시 값이 실제와 다를 수 있음</div>'; }
+  if(snap.demo){ banner+='<div class="note-banner info">🧪 DEMO — 샘플 데이터 (라이브 클러스터 아님)</div>'; }
+  else if(!snap.k8s_enabled){ banner+='<div class="note-banner">⚠ k8s 비활성 — in-cluster 토큰 없음. 미리보기는 MONITOR_DEMO=true</div>'; }
+  else if((snap.errors||[]).length){ banner+='<div class="note-banner">⚠ '+esc(snap.errors.join(" · "))+'</div>'; }
   $("#banner").innerHTML = banner;
 
   const s = snap.summary || {};
@@ -389,7 +413,7 @@ function rankedHTML(items, total){
   return '<div class="ranks">'+sorted.map((it,i)=>
     '<div class="rank"><span class="rk">'+(i+1)+'</span>'
     +'<span class="rd" style="background:'+it.color+'"></span>'
-    +'<span class="rl">'+esc(it.label)+'</span>'
+    +'<span class="rl" title="'+esc(it.label)+'">'+esc(it.label)+'</span>'
     +'<span class="rv">'+n(it.v)+'</span>'
     +'<span class="rp">'+(total?Math.round((it.v||0)/total*100):0)+'%</span></div>').join("")+'</div>';
 }
@@ -495,9 +519,9 @@ function nodeCard(nd){
       '<div class="alloc">'
       +'<span class="g">'+n(a.gpu)+'</span>'
       +'<span class="wtype '+typeClass(a.workload_type)+'">'+esc(a.workload_type)+'</span>'
-      +'<span class="w">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
+      +'<span class="w" title="'+esc(a.workload)+'">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
       +'<span class="aspacer"></span>'
-      +'<span class="ns">'+esc(a.namespace)+'</span>'
+      +'<span class="ns" title="'+esc(a.namespace)+'">'+esc(a.namespace)+'</span>'
       +'</div>').join("")+'</div>';
   } else if(nd.error){
     allocs = '<div class="idle">⚠ '+esc(nd.error)+'</div>';
@@ -575,9 +599,9 @@ function sharedBlock(nd){
         '<div class="alloc">'
         +'<span class="g">'+n(a.slots)+'</span>'
         +'<span class="wtype '+typeClass(a.workload_type)+'">'+esc(a.workload_type)+'</span>'
-        +'<span class="w">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
+        +'<span class="w" title="'+esc(a.workload)+'">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
         +'<span class="aspacer"></span>'
-        +'<span class="ns">'+esc(a.namespace)+'</span>'
+        +'<span class="ns" title="'+esc(a.namespace)+'">'+esc(a.namespace)+'</span>'
         +'</div>').join("")+'</div>';
     } else {
       html += '<div class="idle">할당된 슬롯 없음 (전부 유휴)</div>';
@@ -592,10 +616,10 @@ async function tick(){
   try{
     const r = await fetch(BASE_PATH+"/api/snapshot",{cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    render(await r.json());
-    $("#livedot").style.background="var(--up)";
+    render(await r.json());   // render 가 라이브 점 색(정상=up/정체=warn)을 직접 설정
   }catch(e){
-    $("#livedot").style.background="var(--down)";
+    const dot=$("#livedot");
+    dot.classList.remove("stale"); dot.style.background="var(--down)"; dot.title="연결 실패";
     $("#updated").textContent="연결 실패";
   }
 }

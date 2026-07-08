@@ -16,7 +16,8 @@ from app.services.workload import (classify_environment, classify_purpose,
 from app.services.collect import collect_allocations, collect_gpu_nodes
 from app.services.snapshot import summarize
 from app.services.prometheus import render_prometheus_metrics
-from app.services.state import Refresher, SnapshotStore, build_meta
+from app.services.state import (Refresher, SnapshotStore, build_meta,
+                                 compute_freshness)
 
 
 class FakeClient:
@@ -732,6 +733,38 @@ class TestObservability(unittest.TestCase):
         self.assertEqual((r.refreshes, r.failures), (1, 1))
         self.assertIsNone(store.last_success_epoch)   # 실패 사이클은 갱신 금지
         self.assertIsNone(store.get())
+
+
+class TestFreshness(unittest.TestCase):
+    """compute_freshness — 데이터 신선도(정체 탐지) 순수 함수."""
+
+    def test_none_before_first_collect(self):
+        f = compute_freshness(None, 15, now=1000.0)
+        self.assertEqual(f, {"age_seconds": None, "stale": False,
+                             "interval_seconds": 15.0})
+
+    def test_fresh_within_window(self):
+        f = compute_freshness(1000.0, 15, now=1005.0)   # 5s < 15*3
+        self.assertEqual(f["age_seconds"], 5.0)
+        self.assertFalse(f["stale"])
+
+    def test_stale_beyond_factor(self):
+        f = compute_freshness(1000.0, 15, now=1050.0)   # 50s > 15*3=45
+        self.assertEqual(f["age_seconds"], 50.0)
+        self.assertTrue(f["stale"])
+
+    def test_boundary_at_factor_not_stale(self):
+        f = compute_freshness(1000.0, 15, now=1045.0)   # 정확히 45s == 경계
+        self.assertFalse(f["stale"])                    # 초과(>)만 stale
+
+    def test_age_clamped_nonnegative(self):
+        f = compute_freshness(1000.0, 15, now=990.0)    # now < last (시계 역행)
+        self.assertEqual(f["age_seconds"], 0.0)
+        self.assertFalse(f["stale"])
+
+    def test_interval_floored_to_one(self):
+        f = compute_freshness(None, 0, now=1000.0)      # interval 0 -> 1 로 보정
+        self.assertEqual(f["interval_seconds"], 1.0)
 
 
 class DashboardInjectionTest(unittest.TestCase):

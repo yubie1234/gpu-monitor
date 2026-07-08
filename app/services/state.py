@@ -66,6 +66,22 @@ class Refresher:
                 pass
 
 
+def compute_freshness(last_success_epoch, interval, now, stale_factor=3):
+    """마지막 성공 수집 시각으로 데이터 신선도 계산 (순수 함수 — FastAPI 없이 테스트).
+
+    age 는 서버 now 기준(초), 음수로 안 내려가게 clamp. 첫 수집 전(last=None)이면
+    age=None·stale=False. stale 은 age 가 interval*stale_factor(기본 3배 = 2회 이상
+    사이클 누락)을 넘을 때 True — 일시 지연 오탐을 피하면서 진짜 정지는 잡는다.
+    """
+    interval = max(float(interval or 1.0), 1.0)
+    if last_success_epoch is None:
+        return {"age_seconds": None, "stale": False, "interval_seconds": interval}
+    age = max(now - last_success_epoch, 0.0)
+    return {"age_seconds": round(age, 1),
+            "stale": age > interval * stale_factor,
+            "interval_seconds": interval}
+
+
 def build_meta(store, refresher):
     """/metrics 용 관측성 meta.
 
