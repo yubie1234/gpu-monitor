@@ -11,7 +11,8 @@ from app.services.gpu import (
     node_gpu, node_ready, pod_gpu, pod_ready, short_gpu_product,
     pod_gpu_resources, is_gpu_resource, shared_profile, classify_gpu_resource,
 )
-from app.services.workload import classify_workload
+from app.services.workload import (classify_environment, classify_purpose,
+                                    classify_workload)
 from app.services.collect import collect_allocations, collect_gpu_nodes
 from app.services.snapshot import summarize
 from app.services.prometheus import render_prometheus_metrics
@@ -222,6 +223,76 @@ class TestClassifyWorkload(unittest.TestCase):
     def test_bare_pod(self):
         w = classify_workload(_pod("lonely", "ns", 1))
         self.assertEqual(w, {"type": "Pod", "name": "lonely"})
+
+
+class TestPurposeEnv(unittest.TestCase):
+    """사용 목적(purpose) / 배포 환경(environment) 분류 + 집계 축."""
+
+    def test_purpose_serving(self):
+        self.assertEqual(classify_purpose(_pod("p", "kserve", 1,
+            labels={"serving.kserve.io/inferenceservice": "q"})), "serving")
+        self.assertEqual(classify_purpose(_pod("p", "svc", 1,
+            labels={"app.kubernetes.io/component": "predictor"})), "serving")
+
+    def test_purpose_interactive(self):
+        self.assertEqual(classify_purpose(_pod("nb", "ns", 1,
+            labels={"notebook-name": "jh"})), "interactive")
+
+    def test_purpose_training_operator(self):
+        self.assertEqual(classify_purpose(_pod("t", "ns", 4,
+            owner={"kind": "PyTorchJob", "name": "bert"})), "training")
+
+    def test_purpose_batch_plain_job(self):
+        # 일반 Job 은 학습이 아니라 배치 (학습 신호가 없으므로)
+        self.assertEqual(classify_purpose(_pod("j", "ns", 1,
+            owner={"kind": "Job", "name": "eval"})), "batch")
+
+    def test_purpose_system(self):
+        self.assertEqual(classify_purpose(_pod("d", "ns", 1,
+            owner={"kind": "DaemonSet", "name": "dcgm"})), "system")
+        self.assertEqual(classify_purpose(_pod("x", "gpu-operator", 1)), "system")
+
+    def test_purpose_override_beats_owner(self):
+        self.assertEqual(classify_purpose(_pod("j", "ns", 1,
+            owner={"kind": "Job", "name": "x"},
+            labels={"gpu-monitor.io/purpose": "Serving"})), "serving")
+
+    def test_purpose_fallback(self):
+        self.assertEqual(classify_purpose(_pod("x", "ns", 1)), "기타")
+
+    def test_env_normalize_and_custom(self):
+        self.assertEqual(classify_environment(_pod("x", "ns", 1,
+            labels={"environment": "Production"})), "prod")
+        self.assertEqual(classify_environment(_pod("x", "ns", 1,
+            labels={"env": "qa"})), "staging")
+        # 알 수 없는 비어있지 않은 값은 원값(소문자)으로 통과
+        self.assertEqual(classify_environment(_pod("x", "ns", 1,
+            labels={"env": "Canary"})), "canary")
+
+    def test_env_override_precedence(self):
+        self.assertEqual(classify_environment(_pod("x", "ns", 1,
+            labels={"env": "dev", "gpu-monitor.io/environment": "prod"})), "prod")
+
+    def test_env_fallback(self):
+        self.assertEqual(classify_environment(_pod("x", "ns", 1)), "기타")
+
+    def test_summarize_axes_and_totality(self):
+        snap = {"nodes": [{"capacity": 4, "allocated": 3, "free": 1, "allocations": [
+            {"gpu": 2, "purpose": "serving", "environment": "prod"},
+            {"gpu": 1, "purpose": "training", "environment": "dev"}]}]}
+        s = summarize(snap)
+        self.assertEqual(s["by_purpose"], {"serving": 2, "training": 1})
+        self.assertEqual(s["by_environment"], {"prod": 2, "dev": 1})
+        # 전수 보존: 각 축 버킷 합 == gpu_allocated
+        self.assertEqual(sum(s["by_purpose"].values()), s["gpu_allocated"])
+        self.assertEqual(sum(s["by_environment"].values()), s["gpu_allocated"])
+
+    def test_summarize_axes_fallback(self):
+        snap = {"nodes": [{"capacity": 1, "allocated": 1, "free": 0,
+                           "allocations": [{"gpu": 1}]}]}
+        s = summarize(snap)
+        self.assertEqual(s["by_purpose"], {"기타": 1})
+        self.assertEqual(s["by_environment"], {"기타": 1})
 
 
 class TestCollect(unittest.TestCase):

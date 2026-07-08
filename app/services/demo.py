@@ -1,4 +1,8 @@
-"""라이브 클러스터 없이 미리보기용 샘플 스냅샷 (MONITOR_DEMO=true)."""
+"""라이브 클러스터 없이 미리보기용 샘플 스냅샷 (MONITOR_DEMO=true).
+
+allocation 의 purpose/environment 는 라이브에선 classify_purpose/classify_environment
+가 pod 라벨로 채우지만, 데모는 하드코딩 dict 라 대표값을 직접 넣는다.
+"""
 
 from datetime import datetime
 
@@ -20,29 +24,35 @@ def demo_snapshot():
               "allocations": [
                   {"namespace": "team-ml", "pod": "jhwang-notebook-0",
                    "workload": "jhwang", "workload_type": "Notebook",
+                   "purpose": "interactive", "environment": "dev",
                    "slots": 2, "ready": True},
                   {"namespace": "team-ml", "pod": "eval-batch-x2k9",
                    "workload": "eval-batch", "workload_type": "Job",
+                   "purpose": "batch", "environment": "dev",
                    "slots": 1, "ready": False}]}],
          "allocations": [
              {"namespace": "kserve", "pod": "qwen3-72b-instruct-predictor-0",
               "workload": "qwen3-72b-instruct", "workload_type": "KServe",
+              "purpose": "serving", "environment": "prod",
               "gpu": 7, "ready": True}]},
         {"name": "gpu-node-02", "ready": True, "product": "H100",
          "product_raw": "NVIDIA-H100-80GB-HBM3", "capacity": 8, "allocatable": 8,
          "allocated": 3, "free": 5, "error": None,
          "allocations": [
              {"namespace": "team-ml", "pod": "sft-run-42-9f2k7",
-              "workload": "sft-run-42", "workload_type": "Job", "gpu": 2, "ready": True},
+              "workload": "sft-run-42", "workload_type": "Job",
+              "purpose": "training", "environment": "dev", "gpu": 2, "ready": True},
              {"namespace": "kserve", "pod": "llama3-8b-eval-predictor-6c8b9-abcde",
-              "workload": "llama3-8b-eval", "workload_type": "KServe", "gpu": 1,
+              "workload": "llama3-8b-eval", "workload_type": "KServe",
+              "purpose": "serving", "environment": "staging", "gpu": 1,
               "ready": True}]},
         {"name": "gpu-node-03", "ready": True, "product": "B200",
          "product_raw": "NVIDIA-B200", "capacity": 8, "allocatable": 8,
          "allocated": 1, "free": 7, "error": None,
          "allocations": [
              {"namespace": "research", "pod": "jhwang-notebook-0",
-              "workload": "jhwang", "workload_type": "Notebook", "gpu": 1,
+              "workload": "jhwang", "workload_type": "Notebook",
+              "purpose": "interactive", "environment": "dev", "gpu": 1,
               "ready": True}]},
         # MIG mixed: 물리 4 중 3장 온전, 1장을 MIG 로 7×1g.10gb 분할(하드웨어 격리).
         {"name": "mig-node-01", "ready": True, "product": "A100",
@@ -56,13 +66,16 @@ def demo_snapshot():
               "allocations": [
                   {"namespace": "kserve", "pod": "bert-embed-predictor-0",
                    "workload": "bert-embed", "workload_type": "KServe",
+                   "purpose": "serving", "environment": "prod",
                    "slots": 3, "ready": True},
                   {"namespace": "team-ml", "pod": "hp-tune-7f9k",
                    "workload": "hp-tune", "workload_type": "Job",
+                   "purpose": "training", "environment": "dev",
                    "slots": 2, "ready": True}]}],
          "allocations": [
              {"namespace": "default", "pod": "vllm-a100-predictor-0",
-              "workload": "vllm-a100", "workload_type": "KServe", "gpu": 2,
+              "workload": "vllm-a100", "workload_type": "KServe",
+              "purpose": "serving", "environment": "prod", "gpu": 2,
               "ready": True}]},
     ]
     snap = {"version": __version__,

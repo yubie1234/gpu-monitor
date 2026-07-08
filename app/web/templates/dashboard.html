@@ -219,6 +219,19 @@ const TYPE_COLORS = {
 };
 function typeColor(t){ return TYPE_COLORS[t] || "#8b97a7"; }
 
+// 사용 목적(purpose) -> 색 + 한글 라벨. 백엔드 버킷은 영문(+'기타' fallback).
+const PURPOSE_META = {
+  serving:{c:"#6e8bff", ko:"서빙"}, training:{c:"#d29922", ko:"학습"},
+  interactive:{c:"#b083f0", ko:"인터랙티브"}, batch:{c:"#4cc4c0", ko:"배치"},
+  system:{c:"#5b6675", ko:"시스템"}
+};
+function purposeColor(p){ return (PURPOSE_META[p]||{}).c || "#8b97a7"; }
+function purposeLabel(p){ return (PURPOSE_META[p]||{}).ko || p; }
+
+// 배포 환경(environment) -> 색. prod/staging/dev 고정, 그 외 커스텀 값은 해시색.
+const ENV_COLORS = {prod:"#3fb950", staging:"#d29922", dev:"#6e8bff", "기타":"#5b6675"};
+function envColor(e){ return ENV_COLORS[e] || productColor(e); }
+
 // 장치(제품)별 색 — 워크로드 팔레트(TYPE_COLORS + #b083f0/#8b97a7)와 겹치지 않는 별도
 // 카테고리 팔레트. 제품명을 해시해 색을 고정하므로(등장 순서 아님) 노드 집합이 바뀌어도
 // 같은 제품은 같은 색을 유지한다. 제품 종류가 팔레트 수를 넘으면 색이 겹칠 수 있다(범례 텍스트로 구분).
@@ -298,6 +311,22 @@ function render(snap){
       pct: alloc?Math.round(byType[t]/alloc*100):0}));
   draws.push(()=>drawDonut("viz-type", typeSegs, alloc||1, n(alloc), "할당 GPU"));
 
+  // 사용 목적 — 도넛 (serving/training/interactive/batch/system)
+  const byPurpose = s.by_purpose || {};
+  const purpKeys = Object.keys(byPurpose).sort((a,b)=>byPurpose[b]-byPurpose[a]);
+  const purpSegs = purpKeys.map(p=>({v:byPurpose[p],color:purposeColor(p)}));
+  const purpLeg = purpKeys.map(p=>({color:purposeColor(p),label:purposeLabel(p),
+      v:byPurpose[p], pct: alloc?Math.round(byPurpose[p]/alloc*100):0}));
+  draws.push(()=>drawDonut("viz-purpose", purpSegs, alloc||1, n(alloc), "할당 GPU"));
+
+  // 배포 환경 — 도넛 (prod/staging/dev)
+  const byEnv = s.by_environment || {};
+  const envKeys = Object.keys(byEnv).sort((a,b)=>byEnv[b]-byEnv[a]);
+  const envSegs = envKeys.map(e=>({v:byEnv[e],color:envColor(e)}));
+  const envLeg = envKeys.map(e=>({color:envColor(e),label:e,v:byEnv[e],
+      pct: alloc?Math.round(byEnv[e]/alloc*100):0}));
+  draws.push(()=>drawDonut("viz-env", envSegs, alloc||1, n(alloc), "할당 GPU"));
+
   // 네임스페이스 — 랭킹 리스트 (범주가 많아도 안 깨짐)
   const byNs = s.by_namespace || {};
   const nsItems = Object.keys(byNs).map(k=>({color:productColor(k),label:k,v:byNs[k]}));
@@ -315,7 +344,9 @@ function render(snap){
     + vizCard("물리 GPU", "viz-phys",
         legendHTML(physLeg) + partHTML,
         "할당률 "+pct+"% · 온전 "+n(cap))
-    + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "할당 "+n(alloc)+" GPU 기준");
+    + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "할당 "+n(alloc)+" GPU 기준")
+    + vizCard("사용 목적", "viz-purpose", legendHTML(purpLeg), "할당 "+n(alloc)+" GPU 기준")
+    + vizCard("배포 환경", "viz-env", legendHTML(envLeg), "할당 "+n(alloc)+" GPU 기준");
   if(nsItems.length){
     cardsHtml += '<div class="card"><div class="label">네임스페이스별 할당</div>'
       + rankedHTML(nsItems, alloc) + '</div>';
