@@ -134,6 +134,19 @@ def render_prometheus_metrics(snap, meta=None):
         out.append('gpu_monitor_gpu_allocated_by_namespace{namespace="%s"} %d'
                    % (_esc(ns), int(v)))
 
+    out.append("# HELP gpu_monitor_gpu_allocated_by_purpose"
+               " Allocated GPU by usage purpose (serving/training/interactive/batch/system).")
+    out.append("# TYPE gpu_monitor_gpu_allocated_by_purpose gauge")
+    for p, v in (s.get("by_purpose") or {}).items():
+        out.append('gpu_monitor_gpu_allocated_by_purpose{purpose="%s"} %d' % (_esc(p), int(v)))
+
+    out.append("# HELP gpu_monitor_gpu_allocated_by_environment"
+               " Allocated GPU by deploy environment (prod/staging/dev).")
+    out.append("# TYPE gpu_monitor_gpu_allocated_by_environment gauge")
+    for e, v in (s.get("by_environment") or {}).items():
+        out.append('gpu_monitor_gpu_allocated_by_environment{environment="%s"} %d'
+                   % (_esc(e), int(v)))
+
     # ready 는 양쪽 라벨을 항상 방출한다(0 이어도) — 알럿식이 absent 에 걸리지 않게.
     by_ready = s.get("by_ready") or {}
     out.append("# HELP gpu_monitor_gpu_allocated_by_ready Allocated GPU by pod readiness.")

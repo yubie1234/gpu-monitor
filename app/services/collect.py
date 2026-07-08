@@ -8,7 +8,8 @@ import urllib.parse
 
 from app.services.gpu import (GPU_RESOURCE, classify_gpu_resource, node_gpu,
                               node_ready, pod_gpu_resources, pod_ready)
-from app.services.workload import classify_workload
+from app.services.workload import (classify_environment, classify_purpose,
+                                    classify_workload)
 
 
 def collect_gpu_nodes(client, settings):
@@ -81,6 +82,8 @@ def collect_allocations(client, node):
         wl = classify_workload(pod)
         base = {"namespace": meta.get("namespace"), "pod": meta.get("name"),
                 "workload": wl["name"], "workload_type": wl["type"],
+                "purpose": classify_purpose(pod, wl),
+                "environment": classify_environment(pod),
                 "ready": pod_ready(pod)}
         whole = usage.get(GPU_RESOURCE, 0)
         if whole > 0:

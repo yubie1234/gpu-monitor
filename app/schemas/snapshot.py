@@ -14,6 +14,8 @@ class Allocation(BaseModel):
     pod: Optional[str] = None
     workload: Optional[str] = None
     workload_type: Optional[str] = None
+    purpose: Optional[str] = None      # serving/training/interactive/batch/system/기타
+    environment: Optional[str] = None  # prod/staging/dev/<raw>/기타
     gpu: Optional[int] = None
     ready: Optional[bool] = None
 
@@ -24,6 +26,8 @@ class SharedAllocation(BaseModel):
     pod: Optional[str] = None
     workload: Optional[str] = None
     workload_type: Optional[str] = None
+    purpose: Optional[str] = None
+    environment: Optional[str] = None
     slots: Optional[int] = None  # 온전 GPU 와 단위가 다르다(타임슬라이스/MPS 슬롯)
     ready: Optional[bool] = None
 
@@ -76,6 +80,8 @@ class Summary(BaseModel):
     shared: Optional[Dict[str, Any]] = None  # 공유 슬롯 집계(capacity/allocated/free/by_profile)
     by_workload_type: Optional[Dict[str, int]] = None
     by_namespace: Optional[Dict[str, int]] = None
+    by_purpose: Optional[Dict[str, int]] = None      # 사용 목적별 할당 GPU
+    by_environment: Optional[Dict[str, int]] = None  # 배포 환경별 할당 GPU
     by_ready: Optional[Dict[str, int]] = None  # 키는 "true"/"false"
 
 

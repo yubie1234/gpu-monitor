@@ -1,4 +1,4 @@
-# gpu-monitor `v0.3.1`
+# gpu-monitor `v0.4.0`
 
 노드별 **GPU 할당(allocation) 현황** 대시보드. 클러스터의 각 노드가 어떤 GPU를 몇 개
 가졌고(capacity), 그중 몇 개가 어떤 워크로드에 **할당**됐는지(allocated), 몇 개가
@@ -15,10 +15,13 @@
 - **노드별**: GPU 장치명(H100/B200…) · 할당/총량 · 유휴
 - **노드 내 할당 목록**: 각 GPU 점유 Pod 을 **워크로드 타입**과 함께
   (KServe · Job · Notebook · Deployment · StatefulSet · …, Pod 라벨/owner 로 추정)
+- **사용 목적·환경 축**: 같은 할당 GPU 를 **용도**(serving/training/interactive/batch/system)와
+  **배포 환경**(prod/staging/dev)으로도 재집계. Pod 라벨 기반이며 `gpu-monitor.io/purpose`·
+  `gpu-monitor.io/environment` 라벨로 직접 지정(override) 가능. 할당(allocation) 경계는 그대로
 - **파티션 GPU (공유·MIG)**: 물리 GPU 1장을 쪼갠 `nvidia.com/gpu.<프로파일>`(타임슬라이스/MPS)
   또는 `nvidia.com/mig-<프로파일>`(MIG)을 **슬롯/인스턴스 단위로 별도** 표시. "물리 8장 중 1장이
   분할"까지 재구성 (아래 [파티션 GPU](#파티션-gpu--공유타임슬라이스mps--mig) 참고)
-- **클러스터 집계**: 총/할당/유휴 GPU, 장치별·워크로드 타입별 분포
+- **클러스터 집계**: 총/할당/유휴 GPU, 장치별·워크로드 타입별·**사용 목적별**·**환경별** 분포
 - Prometheus `/metrics`
 
 ## 실행
@@ -62,6 +65,8 @@ MONITOR_DEMO=true uvicorn app.main:app --port 8089
 | `gpu_monitor_node_collect_error` | gauge (0/1) | `node`, `product` | 노드 Pod 조회 실패 — 1 이면 그 노드 allocation 이 과소집계 중 |
 | `gpu_monitor_gpu_allocated_by_type` | gauge | `type` | 워크로드 타입별 할당 |
 | `gpu_monitor_gpu_allocated_by_namespace` | gauge | `namespace` | 네임스페이스별 할당 |
+| `gpu_monitor_gpu_allocated_by_purpose` | gauge | `purpose` | 사용 목적별 할당 (serving/training/interactive/batch/system) |
+| `gpu_monitor_gpu_allocated_by_environment` | gauge | `environment` | 배포 환경별 할당 (prod/staging/dev) |
 | `gpu_monitor_gpu_allocated_by_ready` | gauge | `ready` (`true`/`false`) | Pod ready 별 할당 — false = 점유만 하고 아직 안 뜬 GPU |
 | `gpu_monitor_collect_errors` | gauge | – | 스냅샷 수준 수집 오류 수 — RBAC 403 등. `readyz` 는 이때도 200 이므로 이 메트릭이 유일한 신호 |
 | `gpu_monitor_k8s_enabled` / `gpu_monitor_demo` | gauge (0/1) | – | k8s 클라이언트 활성 / 데모 모드 |

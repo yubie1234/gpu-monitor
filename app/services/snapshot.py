@@ -50,6 +50,8 @@ def summarize(snap):
     s = {"node_count": 0, "gpu_capacity": 0, "gpu_allocated": 0, "gpu_free": 0,
          "gpu_physical": 0, "gpu_shared_backing": 0,
          "products": {}, "by_workload_type": {}, "by_namespace": {},
+         # 사용 목적/환경 — 워크로드 타입과 독립된 재집계 축(라벨 기반). 온전 GPU 기준.
+         "by_purpose": {}, "by_environment": {},
          # 파티션(타임슬라이스/MPS/MIG) 슬롯 — 온전 GPU 와 단위가 달라 절대 합치지 않는다.
          # pools: 리소스별 집계(mode/profile 포함) — "분할된 1장이 무엇인지" 표시용.
          "shared": {"capacity": 0, "allocated": 0, "free": 0,
@@ -115,5 +117,9 @@ def summarize(snap):
             s["by_workload_type"][t] = s["by_workload_type"].get(t, 0) + gpu
             ns = a.get("namespace") or "기타"
             s["by_namespace"][ns] = s["by_namespace"].get(ns, 0) + gpu
+            pp = a.get("purpose") or "기타"
+            s["by_purpose"][pp] = s["by_purpose"].get(pp, 0) + gpu
+            ev = a.get("environment") or "기타"
+            s["by_environment"][ev] = s["by_environment"].get(ev, 0) + gpu
             s["by_ready"]["true" if a.get("ready") else "false"] += gpu
     return s
