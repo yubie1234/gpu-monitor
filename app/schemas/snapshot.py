@@ -76,6 +76,7 @@ class Summary(BaseModel):
     gpu_free: Optional[int] = None
     gpu_physical: Optional[int] = None       # 물리 GPU 총수 (gpu.count 합)
     gpu_shared_backing: Optional[int] = None  # 공유로 빠진 물리 장수 합
+    gpu_unknown: Optional[int] = None        # 수집 실패 노드의 온전 GPU (할당/유휴 미상)
     products: Optional[Dict[str, Any]] = None
     shared: Optional[Dict[str, Any]] = None  # 공유 슬롯 집계(capacity/allocated/free/by_profile)
     by_workload_type: Optional[Dict[str, int]] = None
@@ -93,3 +94,6 @@ class Snapshot(BaseModel):
     summary: Optional[Summary] = None
     k8s_enabled: Optional[bool] = None
     errors: Optional[List[str]] = None
+    # 신선도 meta — 요청 시점에 라우트가 채운다(스냅샷 빌드가 아니라).
+    # age_seconds/stale/interval_seconds. 첫 수집 전이면 age=None, stale=False.
+    meta: Optional[Dict[str, Any]] = None

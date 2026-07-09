@@ -3,7 +3,7 @@
 세 가지 축(모두 순수 함수·휴리스틱):
   - classify_workload  -> 워크로드 '무엇'  : KServe/Job/Notebook/Deployment/...
   - classify_purpose   -> 사용 '목적'      : serving/training/interactive/batch/system/기타
-  - classify_environment -> 배포 '환경'    : prod/staging/dev/<raw>/기타
+  - classify_environment -> 배포 '환경'    : prod/staging/test/dev/<raw>/기타
 
 purpose/environment 는 워크로드 타입과 독립된 재집계 축이다(할당 GPU 를 다른 라벨로
 그룹핑). 각 축은 우선순위 목록에서 첫 매치가 이기며, 운영자가 `gpu-monitor.io/<축>`
@@ -37,7 +37,9 @@ _ENV_MAP = {
     "staging": "staging", "stage": "staging", "stg": "staging",
     "qa": "staging", "uat": "staging",
     "development": "dev", "develop": "dev", "dev": "dev",
-    "test": "dev", "testing": "dev", "sandbox": "dev", "sbx": "dev",
+    "sandbox": "dev", "sbx": "dev",
+    # test 는 dev 로 접지 않고 독립 버킷 — 배포 사다리 dev < test < staging < prod.
+    "test": "test", "testing": "test",
 }
 
 
@@ -136,7 +138,7 @@ def classify_purpose(pod, wl=None):
 
 
 def classify_environment(pod):
-    """Pod 라벨로 배포 환경 추정 -> prod|staging|dev|<raw>|기타.
+    """Pod 라벨로 배포 환경 추정 -> prod|staging|test|dev|<raw>|기타.
 
     ENV_LABEL_KEYS 우선순위로 첫 값. 알려진 동의어는 정규화, 그 외 비어있지 않은 값은
     원값(소문자)으로 통과(운영자 커스텀 환경명 보존). 라벨 없음 -> 기타.

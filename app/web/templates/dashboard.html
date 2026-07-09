@@ -30,6 +30,8 @@
     display:flex;align-items:center;gap:14px}
   .dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:5px}
   .dot.live{background:var(--up);animation:pulse 2s infinite}
+  /* 정체(stale) 상태 — 초록 펄스는 끄고 경고색으로. 배경색은 스크립트가 --warn 으로 덮는다. */
+  .dot.live.stale{animation:none}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(63,185,80,.45)}
     70%{box-shadow:0 0 0 6px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
   @media (prefers-reduced-motion:reduce){.dot.live{animation:none}}
@@ -61,14 +63,45 @@
   .sec-title .src{font-family:var(--mono);text-transform:none;letter-spacing:0;
     color:var(--faint);font-size:11px}
 
+  /* 노드 필터/정렬 컨트롤 바 — 노드가 많은 클러스터에서 스캔 비용을 줄인다(전부 클라이언트 필터, 재요청 없음). */
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  .ctl-input,.ctl-sel{font-family:var(--sans);font-size:12.5px;color:var(--text);
+    background:var(--surface);border:1px solid var(--border);border-radius:7px;
+    padding:6px 10px;line-height:1.4}
+  .ctl-input{min-width:220px;flex:0 1 280px}
+  .ctl-input::placeholder{color:var(--faint)}
+  .ctl-input:focus,.ctl-sel:focus{outline:none;border-color:var(--accent)}
+  .ctl-sel{cursor:pointer;font-family:var(--mono);color:var(--muted)}
+  .chip{font-size:11.5px;color:var(--muted);background:var(--surface);
+    border:1px solid var(--border);border-radius:20px;padding:4px 11px;cursor:pointer;
+    user-select:none;white-space:nowrap}
+  .chip:hover{border-color:var(--accent);color:var(--text)}
+  .chip.on{color:var(--accent);border-color:rgba(110,139,255,.55);background:rgba(110,139,255,.1)}
+  .controls .fspacer{flex:1}
+  .ctl-count{font-family:var(--mono);font-size:11.5px;color:var(--faint);white-space:nowrap}
+  /* 문제 요약 칩 — 클릭하면 NotReady/수집에러 노드만 필터(토글) */
+  .probchip{font-family:var(--mono);font-size:11.5px;color:var(--warn);cursor:pointer;
+    background:rgba(210,153,34,.1);border:1px solid rgba(210,153,34,.4);
+    border-radius:7px;padding:5px 11px;user-select:none;white-space:nowrap}
+  .probchip:hover{border-color:var(--warn)}
+  .probchip.on{background:rgba(210,153,34,.22);color:var(--warn);border-color:var(--warn)}
+  .probchip.ok{color:var(--up);background:rgba(63,185,80,.08);border-color:rgba(63,185,80,.3);
+    cursor:default}
+
   /* 노드 카드 그리드 */
   .nodes{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
   .node{background:var(--surface);border:1px solid var(--border);border-radius:11px;
     padding:15px 16px;display:flex;flex-direction:column;gap:12px}
   .node.full{border-color:rgba(210,153,34,.4)}
   .node.notready{opacity:.7;border-style:dashed}
+  /* 수집 실패(할당 미상) 노드 — 붉은 테두리 + 뱃지로 '여유 있음' 오인 방지 */
+  .node.err{border-color:rgba(248,81,73,.4)}
+  .errbadge{font-family:var(--mono);font-size:9.5px;font-weight:700;color:var(--down);
+    background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.5);
+    border-radius:20px;padding:1px 8px;letter-spacing:.05em}
   .nhead{display:flex;align-items:center;gap:9px}
-  .nname{font-family:var(--mono);font-weight:650;font-size:14px}
+  .nname{font-family:var(--mono);font-weight:650;font-size:14px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
   .prodchip{font-family:var(--mono);font-size:10.5px;font-weight:600;color:#c7a6f5;
     background:rgba(176,131,240,.1);border:1px solid rgba(176,131,240,.4);
     border-radius:20px;padding:1px 9px}
@@ -95,7 +128,7 @@
   .wtype.kserve{color:#9db0ff;border-color:rgba(110,139,255,.45);background:rgba(110,139,255,.1)}
   .wtype.job{color:#e9c46a;border-color:rgba(210,153,34,.45);background:rgba(210,153,34,.1)}
   .wtype.notebook{color:#c7a6f5;border-color:rgba(176,131,240,.45);background:rgba(176,131,240,.1)}
-  .wtype.deployment,.wtype.statefulset{color:#7ee2a8;border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.09)}
+  .wtype.deployment,.wtype.statefulset,.wtype.daemonset{color:#7ee2a8;border-color:rgba(63,185,80,.4);background:rgba(63,185,80,.09)}
   .wtype.etc{color:var(--muted);border-color:var(--border);background:var(--surface)}
   .notready-tag{color:var(--warn)}
   .idle{color:var(--faint);font-style:italic;font-size:12px;padding:4px 2px}
@@ -142,6 +175,9 @@
   /* 전용 토큰 'dm-empty' — 범용 .empty(padding:26px) 규칙과 이름이 겹치면 box-sizing:border-box
      상 빈 셀이 ~54px 로 부풀어 사용중 셀의 ~4배가 된다. 슬롯 빈 칸에 'empty' 단독 토큰 금지. */
   .dm.dm-empty{background:var(--surface2);border-color:var(--border)}
+  /* 수집 실패(할당 미상) — 유휴(빈 칸)와 헷갈리지 않게 사선 해치로 구분 */
+  .dm.unknown{background:repeating-linear-gradient(45deg,#4b5568 0 3px,#2b333f 3px 6px);
+    border-color:var(--faint)}
   /* 파티션 모드 테두리: MIG 실선(격리) · TS/MPS 점선(소프트) · parent 링(부모 물리장) */
   .dm.ts{border-style:dashed}
   .dm.mps{border-style:dashed;border-color:rgba(232,147,90,.65)}
@@ -166,6 +202,7 @@
   .empty{color:var(--muted);padding:26px;text-align:center;font-style:italic;
     border:1px solid var(--border);border-radius:9px;background:var(--surface)}
   #banner:not(:empty){margin-bottom:16px}
+  .note-banner + .note-banner{margin-top:8px}
   .note-banner{color:var(--warn);font-family:var(--mono);font-size:12px;
     background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.3);
     border-radius:7px;padding:9px 12px}
@@ -196,6 +233,21 @@
     <div class="sec-title">노드별 GPU
       <span class="src">온전 capacity / allocated / free · 공유 풀(타임슬라이스)은 슬롯 단위 별도</span>
     </div>
+    <div class="controls" id="controls">
+      <input type="search" id="q" class="ctl-input" autocomplete="off" spellcheck="false"
+             placeholder="검색 — 노드 · 장치 · 워크로드 · 네임스페이스">
+      <select id="prod" class="ctl-sel" title="장치(제품)로 필터"></select>
+      <select id="sort" class="ctl-sel" title="노드 정렬 기준">
+        <option value="name">이름순</option>
+        <option value="free">유휴 많은순</option>
+        <option value="util">할당률 높은순</option>
+      </select>
+      <span class="chip" id="f-free">유휴 있음</span>
+      <span class="chip" id="f-full">FULL</span>
+      <span class="ctl-count" id="ncount"></span>
+      <span class="fspacer"></span>
+      <span class="probchip" id="probchip" style="display:none"></span>
+    </div>
     <div class="nodes" id="nodes"></div>
   </section>
 
@@ -208,6 +260,10 @@ const REFRESH_MS = __INTERVAL_MS__;
 const BASE_PATH = __BASE_PATH_JS__;
 const GRAFANA_URL = __GRAFANA_URL_JS__;
 const $ = (s)=>document.querySelector(s);
+
+// --- 렌더 상태 ---
+let LAST_SNAP = null;      // 최신 스냅샷 — 컨트롤(검색/필터/정렬) 재렌더가 재사용(재fetch 없음)
+let onlyProblems = false;  // 문제(NotReady/수집에러) 노드만 필터 토글
 
 // Grafana URL(MONITOR_GRAFANA_URL)이 설정됐을 때만 딥링크 노출 — 히스토리는 Grafana 담당.
 if (GRAFANA_URL) document.getElementById("grafana-link").style.display = "";
@@ -228,8 +284,8 @@ const PURPOSE_META = {
 function purposeColor(p){ return (PURPOSE_META[p]||{}).c || "#8b97a7"; }
 function purposeLabel(p){ return (PURPOSE_META[p]||{}).ko || p; }
 
-// 배포 환경(environment) -> 색. prod/staging/dev 고정, 그 외 커스텀 값은 해시색.
-const ENV_COLORS = {prod:"#3fb950", staging:"#d29922", dev:"#6e8bff", "기타":"#5b6675"};
+// 배포 환경(environment) -> 색. prod/staging/test/dev 고정, 그 외 커스텀 값은 해시색.
+const ENV_COLORS = {prod:"#3fb950", staging:"#d29922", test:"#4cc4c0", dev:"#6e8bff", "기타":"#5b6675"};
 function envColor(e){ return ENV_COLORS[e] || productColor(e); }
 
 // 장치(제품)별 색 — 워크로드 팔레트(TYPE_COLORS + #b083f0/#8b97a7)와 겹치지 않는 별도
@@ -243,7 +299,7 @@ function productColor(name){
 }
 function typeClass(t){
   const k=String(t||"").toLowerCase();
-  if(["kserve","job","notebook","deployment","statefulset"].includes(k)) return k;
+  if(["kserve","job","notebook","deployment","statefulset","daemonset"].includes(k)) return k;
   return "etc";
 }
 
@@ -253,7 +309,7 @@ function n(v){ return (v==null||isNaN(Number(v)))?"–":Number(v).toLocaleString
 
 // Canvas 는 CSS 변수를 못 쓰므로 팔레트를 hex 로 고정(대시보드 :root 와 동일값).
 const COL = {alloc:"#d29922", free:"#3fb950", slice:"#b083f0", accent:"#6e8bff",
-  track:"#1b222c", text:"#e6edf3", muted:"#8b97a7", down:"#f85149"};
+  track:"#1b222c", text:"#e6edf3", muted:"#8b97a7", down:"#f85149", unknown:"#5b6675"};
 const MONO = 'ui-monospace,Menlo,Consolas,monospace';
 // 도트가 벽이 되지 않게: 개수가 이보다 크면 와플(1칸=k개)로 자동 전환.
 const DOT_MAX = 48;
@@ -269,20 +325,45 @@ function nodePartMode(nd){
   return modes.length===0 ? "timeslice" : (modes.length===1 ? modes[0] : "mixed");
 }
 
-function render(snap){
-  $("#ver").textContent = snap.version ? ("v"+snap.version) : "";
-  $("#updated").textContent = snap.ts || "—";
+// 초 단위 나이 -> 사람이 읽는 상대 시각. 라이브 점/배너의 '마지막 수집 N전' 표기용.
+function relAge(sec){
+  sec = Math.max(0, Math.round(Number(sec)||0));
+  if(sec < 60) return sec+"초 전";
+  if(sec < 3600) return Math.floor(sec/60)+"분 전";
+  return Math.floor(sec/3600)+"시간 전";
+}
 
-  // 배너
+function render(snap){
+  LAST_SNAP = snap;                        // 컨트롤(검색/필터/정렬) 재렌더가 재사용
+  $("#ver").textContent = snap.version ? ("v"+snap.version) : "";
+
+  // 신선도 — 서버가 요청 시점에 잰 나이(age)로 정체 여부 판단(브라우저 시계 미사용).
+  // 정체(stale)면 라이브 점을 경고색으로 바꾸고 배너를 띄운다 — HTTP 200 만으로는
+  // '오래된 스냅샷'을 구분 못 하므로(수집 루프가 멈춰도 마지막 스냅샷은 계속 반환됨).
+  const meta = snap.meta || {};
+  const age = meta.age_seconds;
+  const stale = !!meta.stale;
+  $("#updated").textContent = (snap.ts || "—") + (age!=null ? " · "+relAge(age) : "");
+  const dot = $("#livedot");
+  dot.classList.toggle("stale", stale);
+  dot.style.background = stale ? "var(--warn)" : "var(--up)";
+  dot.title = age!=null ? ("마지막 수집 "+relAge(age)) : "";
+
+  // 배너 — 정체는 다른 상태(errors 등)와 겹칠 수 있어 맨 위에 별도로 얹는다.
   let banner="";
-  if(snap.demo){ banner='<div class="note-banner info">🧪 DEMO — 샘플 데이터 (라이브 클러스터 아님)</div>'; }
-  else if(!snap.k8s_enabled){ banner='<div class="note-banner">⚠ k8s 비활성 — in-cluster 토큰 없음. 미리보기는 MONITOR_DEMO=true</div>'; }
-  else if((snap.errors||[]).length){ banner='<div class="note-banner">⚠ '+esc(snap.errors.join(" · "))+'</div>'; }
+  if(stale){ banner+='<div class="note-banner">⚠ 데이터 정체 — 마지막 수집 '
+    +esc(relAge(age))+' (백그라운드 수집 지연/중단?). 표시 값이 실제와 다를 수 있음</div>'; }
+  if(snap.demo){ banner+='<div class="note-banner info">🧪 DEMO — 샘플 데이터 (라이브 클러스터 아님)</div>'; }
+  else if(!snap.k8s_enabled){ banner+='<div class="note-banner">⚠ k8s 비활성 — in-cluster 토큰 없음. 미리보기는 MONITOR_DEMO=true</div>'; }
+  else if((snap.errors||[]).length){ banner+='<div class="note-banner">⚠ '+esc(snap.errors.join(" · "))+'</div>'; }
   $("#banner").innerHTML = banner;
 
   const s = snap.summary || {};
   const cap=s.gpu_capacity||0, alloc=s.gpu_allocated||0, free=s.gpu_free||0;
-  const pct = cap? Math.round(alloc/cap*100):0;
+  const unknown = s.gpu_unknown||0;
+  // 할당률은 '알려진' 온전 GPU(수집 실패분 제외) 기준 — 미상 노드가 비율을 희석하지 않게.
+  const known = Math.max(cap - unknown, 0);
+  const pct = known? Math.round(alloc/known*100):0;
 
   // 물리 GPU + 파티션(공유/MIG) — 온전 GPU 와 단위가 다르다.
   const physical = s.gpu_physical||0, sharedBacking = s.gpu_shared_backing||0;
@@ -301,6 +382,9 @@ function render(snap){
   const physLeg = [{color:COL.alloc,label:"할당",v:alloc},{color:COL.free,label:"유휴",v:free}];
   if(sharedBacking>0){ physSegs.push({v:sharedBacking,color:COL.slice});
     physLeg.push({color:COL.slice,label:"분할",v:sharedBacking,suffix:"장"}); }
+  // 수집 실패 노드의 온전 GPU — 유휴로 착시시키지 않게 '미상'으로 분리 표기.
+  if(unknown>0){ physSegs.push({v:unknown,color:COL.unknown});
+    physLeg.push({color:COL.unknown,label:"미상",v:unknown,suffix:"장"}); }
   draws.push(()=>drawDonut("viz-phys", physSegs, physical||1, n(physical), "물리 GPU"));
 
   // 워크로드 타입 — 도넛
@@ -343,7 +427,8 @@ function render(snap){
         prodKeys.map(p=>esc(p)+" "+n(prodPhys(p))).join(" · "))
     + vizCard("물리 GPU", "viz-phys",
         legendHTML(physLeg) + partHTML,
-        "할당률 "+pct+"% · 온전 "+n(cap))
+        // 할당률은 known(=온전-미상) 기준 — 미상이 있으면 분모가 다름을 명시.
+        "할당률 "+pct+"% · 온전 "+n(cap)+(unknown>0? " (미상 "+n(unknown)+" 제외)":""))
     + vizCard("워크로드 타입", "viz-type", legendHTML(typeLeg), "할당 "+n(alloc)+" GPU 기준")
     + vizCard("사용 목적", "viz-purpose", legendHTML(purpLeg), "할당 "+n(alloc)+" GPU 기준")
     + vizCard("배포 환경", "viz-env", legendHTML(envLeg), "할당 "+n(alloc)+" GPU 기준");
@@ -354,13 +439,119 @@ function render(snap){
   $("#cards").innerHTML = cardsHtml;
   draws.forEach(fn=>{ try{ fn(); }catch(e){} });
 
-  // 노드
-  const nodes = snap.nodes || [];
-  if(!nodes.length){
-    $("#nodes").innerHTML = '<div class="empty">GPU 노드 없음 (또는 아직 수집 전)</div>';
+  // 문제(NotReady/수집에러) 요약 칩 — 모든 카드를 스캔하지 않고 상단에서 즉시 파악.
+  renderProblemChip(snap);
+  // 노드 그리드는 검색/필터/정렬 컨트롤을 반영해 별도로 그린다.
+  renderNodes();
+}
+
+// 노드 유휴(온전) 수 — 수집 실패 노드는 미상이라 0 취급(정렬·필터 안전).
+function nodeFreeCount(nd){
+  if(nd.error) return 0;
+  const cap=nd.capacity||0, alloc=nd.allocated||0;
+  return nd.free!=null? nd.free : Math.max((nd.allocatable||cap)-alloc,0);
+}
+
+// 노드에 문제(수집 에러 or NotReady 노드/워크로드)가 있나 — 문제 필터/요약 공용 판정.
+function nodeHasProblem(nd){
+  if(nd.error) return true;
+  if(nd.ready===false) return true;
+  const hit = a=>a && a.ready===false;
+  if((nd.allocations||[]).some(hit)) return true;
+  return (nd.shared_pools||[]).some(p=>(p.allocations||[]).some(hit));
+}
+
+// 검색어 매칭 — 노드명/제품 + 온전·공유 allocation 의 워크로드/타입/네임스페이스/pod.
+function nodeMatches(nd, q){
+  if(!q) return true;
+  const hay = [nd.name, nd.product, nd.product_raw, nd.sharing_strategy];
+  const push = a=>{ if(a){ hay.push(a.workload, a.workload_type, a.namespace, a.pod); } };
+  (nd.allocations||[]).forEach(push);
+  (nd.shared_pools||[]).forEach(p=>{ hay.push(p.profile, p.resource);
+    (p.allocations||[]).forEach(push); });
+  return hay.some(v=>String(v==null?"":v).toLowerCase().includes(q));
+}
+
+// 장치 필터 <select> 를 스냅샷 제품 목록으로 채운다(현재 선택은 가능한 한 보존).
+// 목록이 그대로면 재빌드하지 않는다 — 자동 새로고침 중 열린 드롭다운이 닫히지 않게.
+function fillProducts(nodes){
+  const sel = $("#prod"); if(!sel) return;
+  const prods = Array.from(new Set(nodes.map(nd=>nd.product||"GPU"))).sort();
+  const have = Array.from(sel.options).slice(1).map(o=>o.value);
+  if(have.length===prods.length && have.every((v,i)=>v===prods[i])) return;
+  const cur = sel.value;
+  sel.innerHTML = ['<option value="">전체 장치</option>'].concat(
+    prods.map(p=>'<option value="'+esc(p)+'">'+esc(p)+'</option>')).join("");
+  if(cur && prods.indexOf(cur)>=0) sel.value = cur;
+}
+
+// 검색/제품/정렬/유휴·FULL·문제 필터를 반영해 노드 그리드만 다시 그린다 — 재fetch 없음.
+function renderNodes(){
+  const snap = LAST_SNAP || {};
+  const all = snap.nodes || [];
+  fillProducts(all);
+  const q = ($("#q").value||"").trim().toLowerCase();
+  const prod = $("#prod").value||"";
+  const sortBy = $("#sort").value||"name";
+  const on = f => $("#f-"+f).classList.contains("on");
+  const wantFree = on("free"), wantFull = on("full");
+
+  let nodes = all.filter(nd=>{
+    if(prod && (nd.product||"GPU")!==prod) return false;
+    const cap = nd.capacity||0, free = nodeFreeCount(nd);
+    if(wantFree && !(free>0)) return false;
+    if(wantFull && !(!nd.error && cap>0 && free===0)) return false;
+    if(onlyProblems && !nodeHasProblem(nd)) return false;
+    return nodeMatches(nd, q);
+  });
+
+  const byName = (a,b)=>String(a.name||"").localeCompare(String(b.name||""));
+  const util = nd=>{ const c=nd.capacity||0; return c? (nd.allocated||0)/c : 0; };
+  if(sortBy==="free") nodes.sort((a,b)=>nodeFreeCount(b)-nodeFreeCount(a) || byName(a,b));
+  else if(sortBy==="util") nodes.sort((a,b)=>util(b)-util(a) || byName(a,b));
+  else nodes.sort(byName);
+
+  const active = q || prod || wantFree || wantFull || onlyProblems;
+  $("#ncount").textContent = all.length
+    ? (active ? nodes.length+" / "+all.length+" 노드" : all.length+" 노드") : "";
+
+  const host = $("#nodes");
+  if(!all.length){
+    host.innerHTML = '<div class="empty">GPU 노드 없음 (또는 아직 수집 전)</div>';
+  } else if(!nodes.length){
+    host.innerHTML = '<div class="empty">조건에 맞는 노드 없음'+(q? ' — "'+esc(q)+'"':'')+'</div>';
+  } else {
+    host.innerHTML = nodes.map(nodeCard).join("");
+  }
+}
+
+// 문제 요약 칩 — NotReady 노드/워크로드 수 + 수집 에러 노드 수. 없으면 "이상 없음" 표기.
+function renderProblemChip(snap){
+  const nodes = (snap && snap.nodes) || [];
+  let notReady = 0, errNodes = 0, notReadyNodes = 0;
+  const countNR = a=>{ if(a && a.ready===false) notReady++; };
+  nodes.forEach(nd=>{
+    if(nd.error) errNodes++;
+    if(nd.ready===false) notReadyNodes++;
+    (nd.allocations||[]).forEach(countNR);
+    (nd.shared_pools||[]).forEach(p=>(p.allocations||[]).forEach(countNR));
+  });
+  const chip = $("#probchip");
+  const problems = notReady + errNodes + notReadyNodes;
+  if(!nodes.length){ chip.style.display="none"; return; }
+  chip.style.display = "";
+  if(!problems){
+    onlyProblems = false;
+    chip.className = "probchip ok";
+    chip.textContent = "✓ 이상 없음";
     return;
   }
-  $("#nodes").innerHTML = nodes.map(nodeCard).join("");
+  const parts = [];
+  if(notReadyNodes) parts.push("노드 NotReady "+notReadyNodes);
+  if(errNodes) parts.push("수집 에러 "+errNodes);
+  if(notReady) parts.push("워크로드 NotReady "+notReady);
+  chip.className = "probchip" + (onlyProblems? " on":"");
+  chip.textContent = "⚠ " + parts.join(" · ") + (onlyProblems? " (필터 켜짐)":"");
 }
 
 function card(label,val,sub,extra,cls){
@@ -389,7 +580,7 @@ function rankedHTML(items, total){
   return '<div class="ranks">'+sorted.map((it,i)=>
     '<div class="rank"><span class="rk">'+(i+1)+'</span>'
     +'<span class="rd" style="background:'+it.color+'"></span>'
-    +'<span class="rl">'+esc(it.label)+'</span>'
+    +'<span class="rl" title="'+esc(it.label)+'">'+esc(it.label)+'</span>'
     +'<span class="rv">'+n(it.v)+'</span>'
     +'<span class="rp">'+(total?Math.round((it.v||0)/total*100):0)+'%</span></div>').join("")+'</div>';
 }
@@ -403,7 +594,7 @@ function partitionHTML(pools){
     const m = modeOf(p.mode), unit = m==="mig"?"인스턴스":"슬롯";
     return '<div class="partline">'
       +'<span class="pbadge b-'+(MODE_CELL[m]||"ts")+'">'+(MODE_LABEL[m]||"공유")+'</span>'
-      +'<span class="pname">'+esc(p.profile||p.resource)+'</span>'
+      +'<span class="pname" title="'+esc(p.profile||p.resource)+'">'+esc(p.profile||p.resource)+'</span>'
       +'<span class="pstat">'+n(p.allocated)+'/'+n(p.capacity)+' '+unit+'</span></div>';
   }).join("")+'</div>';
 }
@@ -472,18 +663,27 @@ function drawDonut(id,segs,total,big,small,sz){
 }
 
 function nodeCard(nd){
+  const isErr = !!nd.error;
   const cap=nd.capacity||0, alloc=nd.allocated||0;
-  const free = nd.free!=null? nd.free : Math.max((nd.allocatable||cap)-alloc,0);
-  const full = cap>0 && free===0;
-  const cls = "node"+(full?" full":"")+(nd.ready===false?" notready":"");
+  // 수집 실패 노드는 할당/유휴가 미상 — 숫자를 지어내지 않는다(free=null).
+  const free = isErr ? null
+    : (nd.free!=null? nd.free : Math.max((nd.allocatable||cap)-alloc,0));
+  const full = !isErr && cap>0 && free===0;
+  const cls = "node"+(full?" full":"")+(isErr?" err":"")+(nd.ready===false?" notready":"");
 
   // 물리 GPU 도트 매트릭스: 셀 1개 = 물리 1장. 색 = 점유 워크로드, 빈칸 = 유휴,
   // 분할(공유/MIG)로 빠진 장은 모드색 + parent 링(아래 풀로 펼쳐진 부모).
   const pmode = nodePartMode(nd);
   const dmGroups = [];
-  (nd.allocations||[]).forEach(a=>dmGroups.push({color:typeColor(a.workload_type),
-    v:a.gpu||0, title:(a.workload||"")+" ("+(a.workload_type||"")+") · "+n(a.gpu)+"GPU"}));
-  if(free>0) dmGroups.push({empty:true, v:free, title:"유휴 "+n(free)});
+  if(isErr){
+    // 유휴(빈 칸)로 오인되지 않게 capacity 를 '미상' 해치 셀로 표시.
+    if(cap>0) dmGroups.push({color:COL.unknown, cls:"unknown", v:cap,
+      title:"수집 실패 — 할당 미상 "+n(cap)+"장"});
+  } else {
+    (nd.allocations||[]).forEach(a=>dmGroups.push({color:typeColor(a.workload_type),
+      v:a.gpu||0, title:(a.workload||"")+" ("+(a.workload_type||"")+") · "+n(a.gpu)+"GPU"}));
+    if(free>0) dmGroups.push({empty:true, v:free, title:"유휴 "+n(free)});
+  }
   if((nd.shared_backing||0)>0) dmGroups.push({color:(MODE_COLOR[pmode]||COL.slice),
     cls:"parent "+(MODE_CELL[pmode]||"ts"), v:nd.shared_backing,
     title:(MODE_LABEL[pmode]||"분할")+" 전환 "+n(nd.shared_backing)+"장 → 아래 풀"});
@@ -495,9 +695,9 @@ function nodeCard(nd){
       '<div class="alloc">'
       +'<span class="g">'+n(a.gpu)+'</span>'
       +'<span class="wtype '+typeClass(a.workload_type)+'">'+esc(a.workload_type)+'</span>'
-      +'<span class="w">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
+      +'<span class="w" title="'+esc(a.workload)+'">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
       +'<span class="aspacer"></span>'
-      +'<span class="ns">'+esc(a.namespace)+'</span>'
+      +'<span class="ns" title="'+esc(a.namespace)+'">'+esc(a.namespace)+'</span>'
       +'</div>').join("")+'</div>';
   } else if(nd.error){
     allocs = '<div class="idle">⚠ '+esc(nd.error)+'</div>';
@@ -505,7 +705,9 @@ function nodeCard(nd){
     allocs = '<div class="idle">할당된 GPU 없음 (전부 유휴)</div>';
   }
 
-  const freeCls = free===0? "free none":"free";
+  const freeCls = (!isErr && free===0)? "free none":"free";
+  const allocTxt = isErr? "–" : n(alloc);
+  const freeTxt = isErr? "–" : n(free);
   const pools = nd.shared_pools||[];
   const hasShared = pools.length>0 || (nd.shared_backing||0)>0;
   const hasMig = pools.some(p=>modeOf(p.mode)==="mig");
@@ -521,13 +723,14 @@ function nodeCard(nd){
     : '';
   return '<div class="'+cls+'">'
     +'<div class="nhead">'
-      +'<span class="nname">'+esc(nd.name)+'</span>'
+      +'<span class="nname" title="'+esc(nd.name)+'">'+esc(nd.name)+'</span>'
       +'<span class="prodchip">'+esc(nd.product||"GPU")+'</span>'
       +(full?'<span class="fullbadge" title="온전 GPU 유휴 0 — 통짜 스케줄 여유 없음">FULL</span>':'')
+      +(isErr?'<span class="errbadge" title="Pod 수집 실패 — 할당/유휴 미상">수집실패</span>':'')
       +(nd.ready===false?'<span class="notready-tag" style="font-size:11px">NotReady</span>':'')
       +'<span class="nspacer"></span>'
-      +'<span class="nstat">할당 <b>'+n(alloc)+'</b>/'+n(cap)
-        +' · 유휴 <b class="'+freeCls+'">'+n(free)+'</b></span>'
+      +'<span class="nstat">할당 <b>'+allocTxt+'</b>/'+n(cap)
+        +' · 유휴 <b class="'+freeCls+'">'+freeTxt+'</b></span>'
     +'</div>'
     +recon
     +dm
@@ -575,9 +778,9 @@ function sharedBlock(nd){
         '<div class="alloc">'
         +'<span class="g">'+n(a.slots)+'</span>'
         +'<span class="wtype '+typeClass(a.workload_type)+'">'+esc(a.workload_type)+'</span>'
-        +'<span class="w">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
+        +'<span class="w" title="'+esc(a.workload)+'">'+esc(a.workload)+(a.ready===false?' <span class="notready-tag">◌</span>':'')+'</span>'
         +'<span class="aspacer"></span>'
-        +'<span class="ns">'+esc(a.namespace)+'</span>'
+        +'<span class="ns" title="'+esc(a.namespace)+'">'+esc(a.namespace)+'</span>'
         +'</div>').join("")+'</div>';
     } else {
       html += '<div class="idle">할당된 슬롯 없음 (전부 유휴)</div>';
@@ -592,18 +795,31 @@ async function tick(){
   try{
     const r = await fetch(BASE_PATH+"/api/snapshot",{cache:"no-store"});
     if(!r.ok) throw new Error("HTTP "+r.status);
-    render(await r.json());
-    $("#livedot").style.background="var(--up)";
+    render(await r.json());   // render 가 라이브 점 색(정상=up/정체=warn)을 직접 설정
   }catch(e){
-    $("#livedot").style.background="var(--down)";
+    const dot=$("#livedot");
+    dot.classList.remove("stale"); dot.style.background="var(--down)"; dot.title="연결 실패";
     $("#updated").textContent="연결 실패";
   }
 }
 
+// 컨트롤(검색/제품/정렬/유휴·FULL/문제) 변경 -> 재fetch 없이 노드 그리드만 다시 그린다.
+$("#q").addEventListener("input", ()=>{ if(LAST_SNAP) renderNodes(); });
+["prod","sort"].forEach(id=>$("#"+id).addEventListener("change",
+  ()=>{ if(LAST_SNAP) renderNodes(); }));
+["f-free","f-full"].forEach(id=>$("#"+id).addEventListener("click", ()=>{
+  $("#"+id).classList.toggle("on"); if(LAST_SNAP) renderNodes(); }));
+$("#probchip").addEventListener("click", ()=>{
+  if($("#probchip").classList.contains("ok")) return; // 이상 없음 칩은 토글 아님
+  onlyProblems = !onlyProblems;
+  if(LAST_SNAP){ renderProblemChip(LAST_SNAP); renderNodes(); }
+});
+
 let timer=null;
 function loop(){ if(timer) clearInterval(timer);
   if($("#auto").checked){ timer=setInterval(tick, REFRESH_MS); } }
-$("#auto").addEventListener("change", loop);
+// auto-refresh 를 다시 켜면 주기를 기다리지 않고 즉시 1회 갱신.
+$("#auto").addEventListener("change", ()=>{ loop(); if($("#auto").checked) tick(); });
 tick(); loop();
 </script>
 </body>

@@ -4,13 +4,14 @@
 """
 
 import json
+import time
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.schemas.snapshot import Snapshot
 from app.services.prometheus import render_prometheus_metrics
-from app.services.state import build_meta
+from app.services.state import build_meta, compute_freshness
 
 router = APIRouter()
 
@@ -21,15 +22,29 @@ def _snap(request: Request):
                     "k8s_enabled": False, "errors": ["아직 첫 수집 전"]}
 
 
+def _freshness(request: Request):
+    """요청 시점 기준 데이터 신선도 meta.
+
+    나이(age)는 서버 시계로 계산한다 — 브라우저·서버 시계 차(skew)에 흔들리지 않게
+    클라이언트가 아니라 여기서 잰다. 계산은 state.compute_freshness(순수 함수)에 위임.
+    """
+    store = request.app.state.store
+    interval = getattr(request.app.state, "interval_ms", 15000) / 1000.0
+    return compute_freshness(
+        getattr(store, "last_success_epoch", None), interval, time.time())
+
+
 @router.get("/api/snapshot", response_model=Snapshot,
             summary="노드별 GPU 할당 스냅샷")
 def api_snapshot(request: Request):
-    return _snap(request)
+    # 스토어 원본을 변형하지 않게 얕은 복사에 meta 를 얹는다.
+    return dict(_snap(request), meta=_freshness(request))
 
 
 @router.get("/snapshot.json", include_in_schema=False)
 def snapshot_json(request: Request):
-    data = json.dumps(_snap(request), ensure_ascii=False, indent=2)
+    data = json.dumps(dict(_snap(request), meta=_freshness(request)),
+                      ensure_ascii=False, indent=2)
     return Response(
         content=data, media_type="application/json",
         headers={"Content-Disposition":

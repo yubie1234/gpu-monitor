@@ -64,7 +64,8 @@ Pod 이 "무엇"인지. 우선순위:
 
 ## 축 3 — 배포 환경 (`classify_environment`)
 
-어떤 환경의 워크로드인지. 버킷: `prod · staging · dev · <커스텀> · 기타`.
+어떤 환경의 워크로드인지. 버킷: `prod · staging · test · dev · <커스텀> · 기타`
+(배포 사다리 `dev < test < staging < prod`).
 
 **라벨 우선순위** (첫 값 채택):
 `gpu-monitor.io/environment` → `app.kubernetes.io/environment` → `environment` → `env` → `stage`
@@ -75,7 +76,8 @@ Pod 이 "무엇"인지. 우선순위:
 |---|---|
 | `production` `prod` `prd` `live` | prod |
 | `staging` `stage` `stg` `qa` `uat` | staging |
-| `development` `develop` `dev` `test` `testing` `sandbox` `sbx` | dev |
+| `test` `testing` | test |
+| `development` `develop` `dev` `sandbox` `sbx` | dev |
 | 그 외 비어있지 않은 값 | **원값(소문자)** — 예: `canary` |
 | 라벨 없음 | 기타 |
 

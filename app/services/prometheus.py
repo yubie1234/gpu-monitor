@@ -35,6 +35,12 @@ def render_prometheus_metrics(snap, meta=None):
     out.append("# TYPE gpu_monitor_cluster_gpu_physical gauge")
     out.append("gpu_monitor_cluster_gpu_physical %d" % int(s.get("gpu_physical") or 0))
 
+    # 수집 실패 노드의 온전 GPU — 할당/유휴 미상. free 로 오인하면 배치 오판이 나므로 별도 계열.
+    out.append("# HELP gpu_monitor_cluster_gpu_unknown"
+               " Whole GPUs on nodes whose pod collection failed (allocation unknown).")
+    out.append("# TYPE gpu_monitor_cluster_gpu_unknown gauge")
+    out.append("gpu_monitor_cluster_gpu_unknown %d" % int(s.get("gpu_unknown") or 0))
+
     # 공유(타임슬라이스/MPS) 슬롯 — 온전 GPU 와 단위가 다르다(1 슬롯 ≠ 1 물리장).
     shared = s.get("shared") or {}
     out.append("# HELP gpu_monitor_cluster_shared_slots"
