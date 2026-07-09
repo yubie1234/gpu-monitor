@@ -266,6 +266,14 @@ class TestPurposeEnv(unittest.TestCase):
             labels={"environment": "Production"})), "prod")
         self.assertEqual(classify_environment(_pod("x", "ns", 1,
             labels={"env": "qa"})), "staging")
+        # test/testing 은 dev 로 접히지 않고 독립 버킷
+        self.assertEqual(classify_environment(_pod("x", "ns", 1,
+            labels={"env": "test"})), "test")
+        self.assertEqual(classify_environment(_pod("x", "ns", 1,
+            labels={"environment": "Testing"})), "test")
+        # sandbox 는 여전히 dev 로 정규화
+        self.assertEqual(classify_environment(_pod("x", "ns", 1,
+            labels={"env": "sandbox"})), "dev")
         # 알 수 없는 비어있지 않은 값은 원값(소문자)으로 통과
         self.assertEqual(classify_environment(_pod("x", "ns", 1,
             labels={"env": "Canary"})), "canary")

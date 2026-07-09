@@ -284,8 +284,8 @@ const PURPOSE_META = {
 function purposeColor(p){ return (PURPOSE_META[p]||{}).c || "#8b97a7"; }
 function purposeLabel(p){ return (PURPOSE_META[p]||{}).ko || p; }
 
-// 배포 환경(environment) -> 색. prod/staging/dev 고정, 그 외 커스텀 값은 해시색.
-const ENV_COLORS = {prod:"#3fb950", staging:"#d29922", dev:"#6e8bff", "기타":"#5b6675"};
+// 배포 환경(environment) -> 색. prod/staging/test/dev 고정, 그 외 커스텀 값은 해시색.
+const ENV_COLORS = {prod:"#3fb950", staging:"#d29922", test:"#4cc4c0", dev:"#6e8bff", "기타":"#5b6675"};
 function envColor(e){ return ENV_COLORS[e] || productColor(e); }
 
 // 장치(제품)별 색 — 워크로드 팔레트(TYPE_COLORS + #b083f0/#8b97a7)와 겹치지 않는 별도
